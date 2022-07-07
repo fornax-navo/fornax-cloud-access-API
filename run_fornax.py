@@ -13,8 +13,9 @@ print(f'\nUsing fornax library in: {fornax.__file__}\n')
 
 # do a simple sia query to chanmaster
 pos = coord.SkyCoord.from_name("ngc 4151")
-query_result = pyvo.dal.sia.search('https://heasarc.gsfc.nasa.gov/xamin_test/vo/sia?table=chanmaster&', pos=pos)
+query_result = pyvo.dal.sia.search('https://heasarc.gsfc.nasa.gov/xamin_aws/vo/sia?table=chanmaster&', pos=pos)
 table_result = query_result.to_table()
+access_url_column = query_result.fieldname_with_ucd('VOX:Image_AccessReference')
 
 
 # data handler
@@ -29,9 +30,9 @@ print(f'{line}\n')
 
 # inject a differnt region name; easier to do here than on the server
 #row_1['cloud_access'] = row_1['cloud_access'].replace('us-east-1', 'us-east-2')
-handler = fornax.AWSDataHandler(data_product)
+handler = fornax.AWSDataHandler(data_product, access_url_column)
 handler._summary()
-handler.download()
+#handler.download()
 
 
 ## test access with credentials:
