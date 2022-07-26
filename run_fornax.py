@@ -11,35 +11,40 @@ print(f'\nUsing fornax library in: {fornax.__file__}\n')
 
 
 
-# do a simple sia query to chanmaster
 pos = coord.SkyCoord.from_name("ngc 4151")
-query_result = pyvo.dal.sia.search('https://heasarc.gsfc.nasa.gov/xamin_aws/vo/sia?table=chanmaster&', pos=pos)
+
+# chandra #
+#query_url = 'https://heasarc.gsfc.nasa.gov/xamin_aws/vo/sia?table=chanmaster&'
+
+# hst #
+query_url = 'https://mast.stsci.edu/portal_vo/Mashup/VoQuery.asmx/SiaV1?MISSION=HST&'
+
+query_result = pyvo.dal.sia.search(query_url, pos=pos, size=0.0)
 table_result = query_result.to_table()
 access_url_column = query_result.fieldname_with_ucd('VOX:Image_AccessReference')
 
 
 # data handler
-data_product = table_result[5]
+data_product = table_result[0]
 
 line = '+'*40
-print(f'\n{line}\nData product:\n{line}')
-
-print(data_product[['obs_id','target_name','instrument_name', 'access_format']])
+print(f'\nData product:\n{line}')
+print(data_product[['instrument_name', access_url_column]])
 print(f'{line}\n')
 
+## ------------------------------------------------------------------------------ ##
+## If testing access with credentials, either set profile to the profile 
+## name in ~/.aws/credentials, or define the environment variables: 
+## AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_SESSION_TOKEN to authenticate.
+## Then rename the bucket name in data_product. (e.g. from dh-fornaxdev 
+## that does not require credentials to heasarc-1, which does). 
+## Injecting the bucket name here is quick hack that we use instead of 
+## modifying the server to return data-products with a different bucket name
 
-# inject a differnt region name; easier to do here than on the server
-#row_1['cloud_access'] = row_1['cloud_access'].replace('us-east-1', 'us-east-2')
-handler = fornax.AWSDataHandler(data_product, access_url_column)
-handler._summary()
-#handler.download()
+#data_product['cloud_access'] = data_product['cloud_access'].replace('dh-fornaxdev', 'heasarc-1')
+myprofile = None
+## ------------------------------------------------------------------------------ ##
 
 
-## test access with credentials:
-## heasarc-1 is at us-west-2 and allows cross region access with credentials (ngaps).
-## Generate credentials in Kion and put them in a profile called ngap_temp_user in ~/.aws/credentials.
-## Here we change the bucket name manually for testing
-# data_product['cloud_access'] = data_product['cloud_access'].replace('dh-fornaxdev', 'heasarc-1')
-# handler = fornax.AWSDataHandler(data_product, profile='ngap_temp_user')
-# handler._summary()
-# handler.download()
+# attemp to access the data.
+fornax.get_data_product(data_product, 'aws', access_url_column=access_url_column, profile=myprofile)
