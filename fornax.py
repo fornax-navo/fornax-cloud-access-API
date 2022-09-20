@@ -144,6 +144,7 @@ class AWSDataHandler(DataHandler):
         self.profile = profile
         self.product = product
         self._s3_uri = None
+        self.bucket_access = {}
 
     @property
     def s3_uri(self):
@@ -213,8 +214,22 @@ class AWSDataHandler(DataHandler):
         # region and access mode
         data_region = aws_info['region']
         data_access = aws_info['access']  # open | region | restricted | none
+        data_bucket = aws_info['bucket_name']
+        data_path = aws_info['key']
+
         log.info(f'data region: {data_region}')
         log.info(f'data access mode: {data_access}')
+
+        # check if we already have access to data_bucket
+        if data_bucket in self.bucket_access.keys():
+            aws_access_info = self.bucket_access[data_bucket]
+            aws_access_info['s3_path'] = data_path
+            aws_access_info['message'] += f', re-using access.'
+            aws_access_info['data_region'] = data_region
+            aws_access_info['data_access'] = data_access
+            log.info(f'Reusing access information for {data_bucket}')
+            return aws_access_info
+
 
         # data on aws not accessible for some reason
         if data_access == 'none':
@@ -225,7 +240,7 @@ class AWSDataHandler(DataHandler):
         if data_access == 'open':
             s3_config = botocore.client.Config(signature_version=botocore.UNSIGNED)
             s3_resource = boto3.resource(service_name='s3', config=s3_config)
-            accessible, message = self.is_accessible(s3_resource, aws_info['bucket_name'], aws_info['key'])
+            accessible, message = self.is_accessible(s3_resource, data_bucket, data_path)
             msg = 'Accessing public data anonymously on aws ... '
             if not accessible:
                 msg = f'{msg}  {message}'
@@ -248,7 +263,7 @@ class AWSDataHandler(DataHandler):
                     msg = f'Accessing {data_access} data anonymously ...'
                     s3_config = botocore.client.Config(signature_version=botocore.UNSIGNED)
                     s3_resource = boto3.resource(service_name='s3', config=s3_config)
-                    accessible, message = self.is_accessible(s3_resource, aws_info['bucket_name'], aws_info['key'])
+                    accessible, message = self.is_accessible(s3_resource, data_bucket, data_path)
                     if accessible:
                         break
                     message = f'  - {msg} {message}.'
@@ -260,7 +275,7 @@ class AWSDataHandler(DataHandler):
                     try:
                         s3_session = boto3.session.Session(profile_name=self.profile)
                         s3_resource = s3_session.resource(service_name='s3')
-                        accessible, message = self.is_accessible(s3_resource, aws_info['bucket_name'], aws_info['key'])
+                        accessible, message = self.is_accessible(s3_resource, data_bucket, data_path)
                         if accessible:
                             break
                         else:
@@ -273,7 +288,7 @@ class AWSDataHandler(DataHandler):
                 # in the user system e.g. environment variables etc. boto3 should find them.
                 msg = f'Accessing {data_access} data with other credentials ...'
                 s3_resource = boto3.resource(service_name='s3')
-                accessible, message = self.is_accessible(s3_resource, aws_info['bucket_name'], aws_info['key'])
+                accessible, message = self.is_accessible(s3_resource, data_bucket, data_path)
                 if accessible:
                     break
                 message = f'  - {msg} {message}.'
@@ -288,12 +303,15 @@ class AWSDataHandler(DataHandler):
             raise AWSDataHandlerError(msg)
 
         # if we make it here, we have valid aws access information.
-        aws_access_info['s3_key'] = aws_info['key']
-        aws_access_info['s3_bucket_name'] = aws_info['bucket_name']
+        aws_access_info['s3_key'] = data_path
+        aws_access_info['s3_bucket_name'] = data_bucket
         aws_access_info['message'] = msg
         aws_access_info['s3_resource'] = s3_resource
         aws_access_info['data_region'] = data_region
         aws_access_info['data_access'] = data_access
+
+        # save some info in case we need it later
+        self.bucket_access[data_bucket] = aws_access_info
 
         return aws_access_info
 
@@ -337,8 +355,26 @@ class AWSDataHandler(DataHandler):
             # TODO: add support for multiple aws access points. This may be useful
             aws_info = cloud_access['aws']
 
-            aws_access_info = self._process_single_aws_entry(aws_info)
-            info.update(aws_access_info)
+            if isinstance(aws_info, list) and len(aws_info) == 1:
+                aws_info = aws_info[0]
+
+            # we have a single aws access point given as a dict
+            if isinstance(aws_info, dict):
+                aws_access_info = self._process_single_aws_entry(aws_info)
+                info.update(aws_access_info)
+
+            # we have multiple aws access points given as a list of dict
+            elif isinstance(aws_info, list):
+                aws_access_info = [self._process_single_aws_entry(aws_i) for aws_i in aws_info]
+
+                # sort access points so that open data comes first
+                sorter = {'open': 0, 'region': 1, 'restricted': 2, 'none': 3}
+                aws_access_info = sorted(aws_access_info, key=lambda x: sorter[x['data_access']])
+                aws_access_info = aws_access_info[0]
+                info.update(aws_access_info)
+            else:
+                msg = f'Unrecognized aws entry: {type(access_info)}. Expected a dict or a list'
+                raise AWSDataHandlerError(msg)
 
         except AWSDataHandlerError as e:
             info['message'] += str(e)
