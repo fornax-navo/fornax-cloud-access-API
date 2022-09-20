@@ -180,6 +180,123 @@ class AWSDataHandler(DataHandler):
 
         return info
 
+    def _process_single_aws_entry(self, aws_info):
+        """Extract the AWS access information from the metadata provided by the server
+
+        Parameters
+        ----------
+        aws_info: dict
+            A dictionay serialized from the json text returned in the cloud_access column
+            returned with the data product.
+
+        Returns
+        -------
+        A dict containing the information needed by boto3 to access the data in s3.
+            s3_path, s3_bucket, s3_resource, data_region and data_access (for data mode).
+            The dict also contains a message as a str to describe the result of the attempted
+            access.
+
+        Raises
+        ------
+        AWSDataHandlerError if the data cannot be accessed for some reason.
+
+        """
+        # data holder
+        aws_access_info = {}
+
+        # first, validate the information provided with the data product
+        try:
+            aws_info = self._validate_aws_info(aws_info)
+        except Exception as e:
+            raise AWSDataHandlerError(str(e))
+
+        # region and access mode
+        data_region = aws_info['region']
+        data_access = aws_info['access']  # open | region | restricted | none
+        log.info(f'data region: {data_region}')
+        log.info(f'data access mode: {data_access}')
+
+        # data on aws not accessible for some reason
+        if data_access == 'none':
+            msg = 'Data access mode is "none".'
+            raise AWSDataHandlerError(msg)
+
+        # data have open access
+        if data_access == 'open':
+            s3_config = botocore.client.Config(signature_version=botocore.UNSIGNED)
+            s3_resource = boto3.resource(service_name='s3', config=s3_config)
+            accessible, message = self.is_accessible(s3_resource, aws_info['bucket_name'], aws_info['key'])
+            msg = 'Accessing public data anonymously on aws ... '
+            if not accessible:
+                msg = f'{msg}  {message}'
+                raise AWSDataHandlerError(msg)
+
+        # data is restricted by region.
+        elif data_access in ['region', 'restricted']:
+
+            accessible = False
+            messages = []
+            while not accessible:
+
+                # -----------------------
+                # NOTE: THIS MAY NEED TO BE COMMENTED OUT BECAUSE IT MAY NOT BE POSSIBLE
+                # TO ACCESS REGION-RESTRICTED DATA ANONYMOUSLY.
+                # -----------------------
+                # Attempting anonymous access:
+
+                if data_access == 'region':
+                    msg = f'Accessing {data_access} data anonymously ...'
+                    s3_config = botocore.client.Config(signature_version=botocore.UNSIGNED)
+                    s3_resource = boto3.resource(service_name='s3', config=s3_config)
+                    accessible, message = self.is_accessible(s3_resource, aws_info['bucket_name'], aws_info['key'])
+                    if accessible:
+                        break
+                    message = f'  - {msg} {message}.'
+                    messages.append(message)
+
+                # If profile is given, try to use it first as it takes precedence.
+                if self.profile is not None:
+                    msg = f'Accessing {data_access} data using profile: {self.profile} ...'
+                    try:
+                        s3_session = boto3.session.Session(profile_name=self.profile)
+                        s3_resource = s3_session.resource(service_name='s3')
+                        accessible, message = self.is_accessible(s3_resource, aws_info['bucket_name'], aws_info['key'])
+                        if accessible:
+                            break
+                        else:
+                            raise AWSDataHandlerError(message)
+                    except Exception as e:
+                        message = f'  - {msg} {str(e)}.'
+                    messages.append(message)
+
+                # If access with profile fails, attemp to use any credientials
+                # in the user system e.g. environment variables etc. boto3 should find them.
+                msg = f'Accessing {data_access} data with other credentials ...'
+                s3_resource = boto3.resource(service_name='s3')
+                accessible, message = self.is_accessible(s3_resource, aws_info['bucket_name'], aws_info['key'])
+                if accessible:
+                    break
+                message = f'  - {msg} {message}.'
+                messages.append(message)
+
+                # if we are here, then we cannot access the data. Fall back to on-prem
+                msg = f'\nUnable to authenticate or access data with "{data_access}" access mode:\n'
+                msg += '\n'.join(messages)
+                raise AWSDataHandlerError(msg)
+        else:
+            msg = f'Unknown data access mode: {data_access}.'
+            raise AWSDataHandlerError(msg)
+
+        # if we make it here, we have valid aws access information.
+        aws_access_info['s3_key'] = aws_info['key']
+        aws_access_info['s3_bucket_name'] = aws_info['bucket_name']
+        aws_access_info['message'] = msg
+        aws_access_info['s3_resource'] = s3_resource
+        aws_access_info['data_region'] = data_region
+        aws_access_info['data_access'] = data_access
+
+        return aws_access_info
+
     def process_data_info(self):
         """Process cloud infromation from data product metadata
 
@@ -219,93 +336,9 @@ class AWSDataHandler(DataHandler):
             # we have info about data in aws; validate it first #
             # TODO: add support for multiple aws access points. This may be useful
             aws_info = cloud_access['aws']
-            try:
-                aws_info = self._validate_aws_info(aws_info)
-            except Exception as e:
-                raise AWSDataHandlerError(str(e))
 
-            data_region = aws_info['region']
-            data_access = aws_info['access']  # open | region | restricted | none
-            log.info(f'data region: {data_region}')
-            log.info(f'data access mode: {data_access}')
-
-            # data on aws not accessible for some reason
-            if data_access == 'none':
-                msg = 'Data access mode is "none".'
-                raise AWSDataHandlerError(msg)
-
-            # data have open access
-            if data_access == 'open':
-                s3_config = botocore.client.Config(signature_version=botocore.UNSIGNED)
-                s3_resource = boto3.resource(service_name='s3', config=s3_config)
-                accessible, message = self.is_accessible(s3_resource, aws_info['bucket_name'], aws_info['key'])
-                msg = 'Accessing public data anonymously on aws ... '
-                if not accessible:
-                    msg = f'{msg}  {message}'
-                    raise AWSDataHandlerError(msg)
-
-            elif data_access in ['region', 'restricted']:
-
-                accessible = False
-                messages = []
-                while not accessible:
-
-                    # -----------------------
-                    # NOTE: THIS MAY NEED TO BE COMMENTED OUT BECAUSE IT MAY NOT BE POSSIBLE
-                    # TO ACCESS REGION-RESTRICTED DATA ANONYMOUSLY.
-                    # -----------------------
-                    # Attempting anonymous access:
-
-                    if data_access == 'region':
-                        msg = f'Accessing {data_access} data anonymously ...'
-                        s3_config = botocore.client.Config(signature_version=botocore.UNSIGNED)
-                        s3_resource = boto3.resource(service_name='s3', config=s3_config)
-                        accessible, message = self.is_accessible(s3_resource, aws_info['bucket_name'], aws_info['key'])
-                        if accessible:
-                            break
-                        message = f'  - {msg} {message}.'
-                        messages.append(message)
-
-                    # If profile is given, try to use it first as it takes precedence.
-                    if self.profile is not None:
-                        msg = f'Accessing {data_access} data using profile: {self.profile} ...'
-                        try:
-                            s3_session = boto3.session.Session(profile_name=self.profile)
-                            s3_resource = s3_session.resource(service_name='s3')
-                            accessible, message = self.is_accessible(s3_resource, aws_info['bucket_name'], aws_info['key'])
-                            if accessible:
-                                break
-                            else:
-                                raise AWSDataHandlerError(message)
-                        except Exception as e:
-                            message = f'  - {msg} {str(e)}.'
-                        messages.append(message)
-
-                    # If access with profile fails, attemp to use any credientials
-                    # in the user system e.g. environment variables etc. boto3 should find them.
-                    msg = f'Accessing {data_access} data with other credentials ...'
-                    s3_resource = boto3.resource(service_name='s3')
-                    accessible, message = self.is_accessible(s3_resource, aws_info['bucket_name'], aws_info['key'])
-                    if accessible:
-                        break
-                    message = f'  - {msg} {message}.'
-                    messages.append(message)
-
-                    # if we are here, then we cannot access the data. Fall back to on-prem
-                    msg = f'\nUnable to authenticate or access data with "{data_access}" access mode:\n'
-                    msg += '\n'.join(messages)
-                    raise AWSDataHandlerError(msg)
-            else:
-                msg = f'Unknown data access mode: {data_access}.'
-                raise AWSDataHandlerError(msg)
-
-            # if we make it here, we have valid aws access information.
-            info['s3_key'] = aws_info['key']
-            info['s3_bucket_name'] = aws_info['bucket_name']
-            info['message'] = msg
-            info['s3_resource'] = s3_resource
-            info['data_region'] = data_region
-            info['data_access'] = data_access
+            aws_access_info = self._process_single_aws_entry(aws_info)
+            info.update(aws_access_info)
 
         except AWSDataHandlerError as e:
             info['message'] += str(e)
