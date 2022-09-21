@@ -22,7 +22,8 @@ The region of the bucket is given in `"region"`.
 
 The type of access, which gives information on on data availability, is in `"access"`, and it can be one of: 
 - `"region"`: for buckets accessible from withing the same region.
-- `"open"`: for buckets can be accessed from anywhere.
+- `"open"`: for buckets that can be accessed from anywhere.
+- `"restricted"`: for buckets need some type of authentication.
 - `"none"`: for data that are not accessible for some reason.
 
 
