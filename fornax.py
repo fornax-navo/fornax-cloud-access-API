@@ -222,7 +222,7 @@ class AWSDataHandler(DataHandler):
 
         # check if we already have access to data_bucket
         if data_bucket in self.bucket_access.keys():
-            aws_access_info = self.bucket_access[data_bucket]
+            aws_access_info = self.bucket_access[data_bucket].copy()
             aws_access_info['s3_path'] = data_path
             aws_access_info['message'] += f', re-using access.'
             aws_access_info['data_region'] = data_region
@@ -315,7 +315,7 @@ class AWSDataHandler(DataHandler):
 
         return aws_access_info
 
-    def process_data_info(self):
+    def process_data_info(self, multi_access_sort=True):
         """Process cloud infromation from data product metadata
 
         This returns a dict which contains information on how to access
@@ -325,6 +325,12 @@ class AWSDataHandler(DataHandler):
         If any information is missing, the returned dict will return access_url
         that allows points to the data location in the on-prem servers as
         a backup.
+
+        Parameters
+        ----------
+        multi_access_sort: bool
+            If True and there are multiple access points, sort them giving
+            priority to open buckets.
 
         """
 
@@ -368,10 +374,11 @@ class AWSDataHandler(DataHandler):
                 aws_access_info = [self._process_single_aws_entry(aws_i) for aws_i in aws_info]
 
                 # sort access points so that open data comes first
-                sorter = {'open': 0, 'region': 1, 'restricted': 2, 'none': 3}
-                aws_access_info = sorted(aws_access_info, key=lambda x: sorter[x['data_access']])
-                aws_access_info = aws_access_info[0]
-                info.update(aws_access_info)
+                if multi_access_sort:
+                    sorter = {'open': 0, 'region': 1, 'restricted': 2, 'none': 3}
+                    aws_access_info = sorted(aws_access_info, key=lambda x: sorter[x['data_access']])
+                info.update(aws_access_info[0])
+                info['access_points'] = aws_access_info
             else:
                 msg = f'Unrecognized aws entry: {type(access_info)}. Expected a dict or a list'
                 raise AWSDataHandlerError(msg)
@@ -411,14 +418,40 @@ class AWSDataHandler(DataHandler):
 
         return accessible, msg
 
-    def download(self, **kwargs):
-        """Download data, from aws if possible, else from on-prem"""
+    def download(self, access_point=0, **kwargs):
+        """Download data, from aws if possible, else from on-prem
+
+        Parameters
+        ----------
+        access_point: int or str
+            The index (0-based) or bucket name to use when multiple access points
+            are available. If only one access point is availabe, this is
+            ignored.
+        **kwargs: to be passed to _download_file_s3
+
+        """
 
         data_info = self.process_data_info()
+
+        # Do we have multiple access points?
+        access_points = data_info['access_points']
+        if len(access_points) != 1 and not access_point in [0, data_info['s3_bucket']]:
+            # access_point as index
+            if isinstance(access_point, [int, np.int32, np.int64]):
+                data_info.update(access_points[access_point])
+
+            # access_point as bucket name
+            elif isinstance(access_point, str):
+                access_point_info = [ap for ap in access_points if ap['s3_bucket'] == access_point]
+                if len(access_point_info) == 0:
+                    raise ValueError((f'Bucket name {access_point} given in access_point does not '
+                                      'match any access point'))
+                data_info.update(access_point_info[0])
 
         # if no s3_resource object, default to http download
         if 's3_resource' in data_info.keys():
             log.info('--- Downloading data from S3 ---')
+            # proceed to actual download
             self._download_file_s3(data_info, **kwargs)
         else:
             log.info('--- Downloading data from On-prem ---')
