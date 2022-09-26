@@ -358,7 +358,6 @@ class AWSDataHandler(DataHandler):
                 raise AWSDataHandlerError(msg)
 
             # we have info about data in aws; validate it first #
-            # TODO: add support for multiple aws access points. This may be useful
             aws_info = cloud_access['aws']
 
             if isinstance(aws_info, list) and len(aws_info) == 1:
@@ -368,6 +367,7 @@ class AWSDataHandler(DataHandler):
             if isinstance(aws_info, dict):
                 aws_access_info = self._process_single_aws_entry(aws_info)
                 info.update(aws_access_info)
+                info['access_points'] = [aws_access_info]
 
             # we have multiple aws access points given as a list of dict
             elif isinstance(aws_info, list):
@@ -433,26 +433,27 @@ class AWSDataHandler(DataHandler):
 
         data_info = self.process_data_info()
 
-        # Do we have multiple access points?
-        access_points = data_info['access_points']
-        if len(access_points) != 1 and not access_point in [0, data_info['s3_bucket']]:
-            # access_point as index
-            if isinstance(access_point, [int, np.int32, np.int64]):
-                data_info.update(access_points[access_point])
-
-            # access_point as bucket name
-            elif isinstance(access_point, str):
-                access_point_info = [ap for ap in access_points if ap['s3_bucket'] == access_point]
-                if len(access_point_info) == 0:
-                    raise ValueError((f'Bucket name {access_point} given in access_point does not '
-                                      'match any access point'))
-                data_info.update(access_point_info[0])
-
         # if no s3_resource object, default to http download
         if 's3_resource' in data_info.keys():
-            log.info('--- Downloading data from S3 ---')
-            # proceed to actual download
-            self._download_file_s3(data_info, **kwargs)
+
+            # Do we have multiple access points?
+            access_points = data_info['access_points']
+            if len(access_points) != 1 and not access_point in [0, data_info['s3_bucket']]:
+                # access_point as index
+                if isinstance(access_point, [int, np.int32, np.int64]):
+                    data_info.update(access_points[access_point])
+
+                # access_point as bucket name
+                elif isinstance(access_point, str):
+                    access_point_info = [ap for ap in access_points if ap['s3_bucket'] == access_point]
+                    if len(access_point_info) == 0:
+                        raise ValueError((f'Bucket name {access_point} given in access_point does not '
+                                          'match any access point'))
+                    data_info.update(access_point_info[0])
+
+                log.info('--- Downloading data from S3 ---')
+                # proceed to actual download
+                self._download_file_s3(data_info, **kwargs)
         else:
             log.info('--- Downloading data from On-prem ---')
             download_file(data_info['access_url'])
