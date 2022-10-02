@@ -5,6 +5,8 @@ import logging
 import threading
 from pathlib import Path
 
+import numpy as np
+
 from astropy.utils.data import download_file
 from astropy.utils.console import ProgressBarOrSpinner
 
@@ -17,7 +19,6 @@ log = logging.getLogger('fornax')
 
 
 __all__ = ['get_data_product', 'DataHandler', 'AWSDataHandler', 'AWSDataHandlerError']
-
 
 
 def get_data_product(product, provider='on-prem', access_url_column='access_url',
@@ -170,11 +171,11 @@ class AWSDataHandler(DataHandler):
 
         # TODO; more rigorous checks
         keys = list(info.keys())
-        assert('region' in keys)
-        assert('access' in keys)
-        assert(info['access'] in ['none', 'open', 'restricted', 'region'])
-        assert('bucket_name' in keys)
-        assert('key' in keys)
+        assert 'region' in keys
+        assert 'access' in keys
+        assert info['access'] in ['none', 'open', 'restricted', 'region']
+        assert 'bucket_name' in keys
+        assert 'key' in keys
 
         if info['key'][0] == '/':
             info['key'] = info['key'][1:]
@@ -193,7 +194,7 @@ class AWSDataHandler(DataHandler):
         Returns
         -------
         A dict containing the information needed by boto3 to access the data in s3.
-            s3_path, s3_bucket, s3_resource, data_region and data_access (for data mode).
+            s3_key, s3_bucket_name, s3_resource, data_region and data_access (for data mode).
             The dict also contains a message as a str to describe the result of the attempted
             access.
 
@@ -223,7 +224,7 @@ class AWSDataHandler(DataHandler):
         # check if we already have access to data_bucket
         if data_bucket in self.bucket_access.keys():
             aws_access_info = self.bucket_access[data_bucket].copy()
-            aws_access_info['s3_path'] = data_path
+            aws_access_info['s3_key'] = data_path
             aws_access_info['message'] += f', re-using access.'
             aws_access_info['data_region'] = data_region
             aws_access_info['data_access'] = data_access
@@ -438,14 +439,14 @@ class AWSDataHandler(DataHandler):
 
             # Do we have multiple access points?
             access_points = data_info['access_points']
-            if len(access_points) != 1 and not access_point in [0, data_info['s3_bucket']]:
+            if len(access_points) != 1 and access_point not in [0, data_info['s3_bucket_name']]:
                 # access_point as index
                 if isinstance(access_point, [int, np.int32, np.int64]):
                     data_info.update(access_points[access_point])
 
-                # access_point as bucket name
+                # access_point as bucket_name
                 elif isinstance(access_point, str):
-                    access_point_info = [ap for ap in access_points if ap['s3_bucket'] == access_point]
+                    access_point_info = [ap for ap in access_points if ap['s3_bucket_name'] == access_point]
                     if len(access_point_info) == 0:
                         raise ValueError((f'Bucket name {access_point} given in access_point does not '
                                           'match any access point'))
