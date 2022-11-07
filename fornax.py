@@ -169,13 +169,23 @@ class AWSDataHandler(DataHandler):
         The same input dict with any standardization applied.
         """
 
-        # TODO; more rigorous checks
-        keys = list(info.keys())
-        assert 'region' in keys
-        assert 'access' in keys
-        assert info['access'] in ['none', 'open', 'restricted', 'region']
-        assert 'bucket_name' in keys
-        assert 'key' in keys
+        meta_keys = list(info.keys())
+        msg0 = ' Failed to process cloud metadata: '
+        
+        # check for required keys
+        required_keys = ['region', 'access', 'bucket_name', 'key']
+        for req_key in required_keys:
+            if not req_key in meta_keys:
+                msg = f'{req_key} value is missing from the cloud_acess column.'
+                raise AWSDataHandlerError(msg0 + msg)
+        
+        # extra checks: access has to be one of these values
+        accepted_access = ['open', 'region', 'restricted', 'none']
+        access = info['access']
+        if not access in accepted_access:
+            msg  = f'Unknown access value {access}. Expected one of '
+            msg += ', '.join(accepted_access)
+            raise AWSDataHandlerError(msg0 + msg)
 
         if info['key'][0] == '/':
             info['key'] = info['key'][1:]
@@ -207,10 +217,7 @@ class AWSDataHandler(DataHandler):
         aws_access_info = {}
 
         # first, validate the information provided with the data product
-        try:
-            aws_info = self._validate_aws_info(aws_info)
-        except Exception as e:
-            raise AWSDataHandlerError(str(e))
+        aws_info = self._validate_aws_info(aws_info)
 
         # region and access mode
         data_region = aws_info['region']
