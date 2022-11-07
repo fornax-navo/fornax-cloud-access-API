@@ -45,6 +45,14 @@ print(f'{line}\n')
 myprofile = None
 ## ------------------------------------------------------------------------------ ##
 
+# inject multiple access points for testing
+# import re
+# access_p = re.findall('aws["\']:\s+(.*)\}', data_product['cloud_access'])[0]
+# data_product['cloud_access'] = '{"aws": [%s, %s]}'%(access_p.replace('open', 'region'), access_p)
+
+# inject the correct json keys by hand while waiting for the servers to update
+#data_product['cloud_access'] = data_product['cloud_access'].replace(
+#    'bucket', 'bucket_name').replace('path', 'key')
 
 # attemp to access the data.
 fornax.get_data_product(data_product, 'aws', access_url_column=access_url_column, profile=myprofile)
