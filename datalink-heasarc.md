@@ -1,18 +1,18 @@
 ### 1. Introduction
 This notenbook contains a simple example of using datalinks to serve data from the cloud. 
 
-This is example uses the HEASARC SIA service. The changes needed on the server side for this to work are:
+This example uses the HEASARC SIA service. The changes needed on the server side for this to work are:
 
 ---
-1. In the SIA (or any other service where datalinks can work), add a `<PARAM>` element inside the `<GROUP>` element in service resources, as defined in the [datalinks standars document](https://ivoa.net/documents/DataLink/20150617/REC-DataLink-1.0-20150617.html).
-The `<PARAM>` element have a name `source`, and contain sources from where the data can be accessed. 
+1. In the SIA (or any other service where datalinks can work), add a `<PARAM>` element inside the `<GROUP>` element in the `adhoc:service` `<RESOURCE>`, as defined in the [datalinks standars document](https://ivoa.net/documents/DataLink/20150617/REC-DataLink-1.0-20150617.html).
+The `<PARAM>` element have a name `source`, and contains sources from where the data can be accessed. The default is `main-server`, that indicates accessing data from on-prem servers.
 
 The following shows an example where the data can be access from four sources:
 
-    - On prem servers
-    - AWS US east1
-    - AWS US east2
-    - Google Cloud (GC).
+    - On prem servers (`value="main-server"`)
+    - AWS US east1 (value="aws:us-east1")
+    - AWS US east2 (value="aws:us-east2")
+    - Google Cloud (value="gc").
 
 
 ```xml
@@ -36,7 +36,7 @@ The following shows an example where the data can be access from four sources:
 
 ---
 
-2. The datalink service source be able to interpret the source parameter, and serve the appropriate `access_url`. So a request to the datalink url with `&source=main-server` should give something like:
+2. The datalink service should be able to interpret the `source` parameter that the clients sends with the datalink request, and serve the appropriate `access_url`. So a request to the datalink url with `&source=main-server` should give something like:
 
 ```xml
 <TABLE>
@@ -91,7 +91,7 @@ pos = SkyCoord.from_name('NGC 4151')
 
 
 ```python
-# make a simple SIA query. If not using in HEASARC, change sia_url.
+# make a simple SIA query. If not the HEASARC, change sia_url.
 #xaminUrl = 'http://localhost:8080/xamin'
 xaminUrl = 'https://heasarc.gsfc.nasa.gov/xamin_aws'
 sia_url = f'{xaminUrl}/vo/sia?table=chanmaster'
