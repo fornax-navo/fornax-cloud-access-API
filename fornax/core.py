@@ -2,9 +2,12 @@ import requests
 import boto3
 import botocore
 import Path
+import pyvo
 
 from astropy.utils.data import download_file
 from astropy.utils.console import ProgressBarOrSpinner
+from astropy.table import Table
+from astropy.io import votable
 
 
 __all__ = ['AccessPoint', 'AWSAccessPoint']
@@ -227,3 +230,48 @@ class AWSAccessPoint(AccessPoint):
 
             bkt.download_file(key, local_path, Callback=progress_callback)
         return local_path
+    
+    
+    
+class DataHandler:
+    """A container for multiple AccessPoint instances"""
+    
+    def __init__(self, data_product):
+        """
+        Parameters
+        ----------
+        data_product: astropy.table or pyvo.dal.DALResults
+        
+        """
+        
+        if not isinstance(dal_result, (pyvo.dal.DALResults, Table)):
+            raise ValueError(f'data_prodcut should be either '
+                              'astropy.table.Table or '
+                              'pyvo.dal.DALResults')
+        
+        # if we have an astropy table, convert to a pyvo.dal.DALResults
+        if isinstance(data_product, Table):
+            vot = votable.from_table(data_product)
+            dal_result = pyvo.dal.DALResults(vot)  
+        else:
+            dal_result = data_product
+        
+        
+        ## column name with direct access url 
+        # SIA v1
+        url_colname = dal_result.fieldname_with_ucd('VOX:Image_AccessReference')
+        if url_colname is None:
+            # SIA v2
+            if 'access_url' in dal_result.fieldnames:
+                url_colname = 'access_url'
+            else:
+                # try by ucd as a final resort
+                url_colname = dal_result.fieldname_with_ucd('meta.ref.url')
+        7y
+        # if still None, raise
+        # TODO allow the user the pass the name to avoid failing
+        if url_colname is None:
+            raise ValueError(f'Could not figure out the column with direct access url')
+        
+        # base AccessPoint
+        base_ap = AccessPoint()
