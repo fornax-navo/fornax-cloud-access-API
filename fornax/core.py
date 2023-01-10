@@ -1,6 +1,10 @@
 import requests
 import boto3
 import botocore
+import Path
+
+from astropy.utils.data import download_file
+from astropy.utils.console import ProgressBarOrSpinner
 
 
 __all__ = ['AccessPoint', 'AWSAccessPoint']
@@ -24,15 +28,29 @@ class AccessPoint:
         self._accessible = None
         
     
-    def download(self):
-        """Download data. Can be overloaded with different implimentation"""
+    def download(self, cache=True):
+        """Download data. Can be overloaded with different implimentation
+        
+        Parameters
+        ----------
+        cache : bool
+            Default is True. If file is found on disc it will not be downloaded again.
+            
+            
+        Return
+        ------
+        local_path : str
+            Returns the local path that the file was download to.
+            
+        """
         
         if self.url is None:
             raise ValueError(f'No on-prem url has been defined.')
         
         log.info(f'downloading data from {self.type} using: {self.url}')
         
-        return download_file(self.url)
+        path = download_file(self.url, cache=cache)
+        return path
     
 
     def is_accessible(self):
@@ -147,3 +165,65 @@ class AWSAccessPoint(AccessPoint):
             self._accessible = (accessible, msg)
                 
         return self._accessible
+
+    
+    # adapted from astroquery.mast.
+    def download(self, cache=True):
+        """
+        downloads the product used in inializing this object into
+        the given directory.
+        
+        
+        Parameters
+        ----------
+        cache : bool
+            Default is True. If file is found on disc it will not be downloaded again.
+        """
+
+        s3 = self.s3_resource
+        s3_client = s3.meta.client
+
+        key = self.s3_key
+        bucket_name = self.s3_bucket_name
+        
+        bkt = s3.Bucket(bucket_name)
+        if not key:
+            raise Exception(f"Unable to locate file {key}.")
+
+        local_path = Path(key).name
+
+        # Ask the webserver (in this case S3) what the expected content length is and use that.
+        info_lookup = s3_client.head_object(Bucket=bucket_name, Key=key)
+        length = info_lookup["ContentLength"]
+
+        if cache and os.path.exists(local_path):
+            if length is not None:
+                statinfo = os.stat(local_path)
+                if statinfo.st_size != length:
+                    log.info(f"Found cached file {local_path} with size {statinfo.st_size} "
+                             f"that is different from expected size {length}.")
+                else:
+                    log.info(f"Found cached file {local_path} with expected size {statinfo.st_size}.")
+                    return
+
+        with ProgressBarOrSpinner(length, (f'Downloading {self.s3_uri} to {local_path} ...')) as pb:
+
+            # Bytes read tracks how much data has been received so far
+            # This variable will be updated in multiple threads below
+            global bytes_read
+            bytes_read = 0
+
+            progress_lock = threading.Lock()
+
+            def progress_callback(numbytes):
+                # Boto3 calls this from multiple threads pulling the data from S3
+                global bytes_read
+
+                # This callback can be called in multiple threads
+                # Access to updating the console needs to be locked
+                with progress_lock:
+                    bytes_read += numbytes
+                    pb.update(bytes_read)
+
+            bkt.download_file(key, local_path, Callback=progress_callback)
+        return local_path
