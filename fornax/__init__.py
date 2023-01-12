@@ -1,2 +1,2 @@
 
-from .core import *
+from .access import DataHandler
