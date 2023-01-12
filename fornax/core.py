@@ -1,7 +1,8 @@
 import requests
 import boto3
 import botocore
-import Path
+from pathlib import Path
+import json
 import pyvo
 
 from astropy.utils.data import download_file
@@ -10,7 +11,7 @@ from astropy.table import Table
 from astropy.io import votable
 
 
-__all__ = ['AccessPoint', 'AWSAccessPoint']
+__all__ = ['AccessPoint', 'AWSAccessPoint', 'DataHandler']
 
 
 
@@ -76,24 +77,23 @@ class AccessPoint:
 
     
 class AWSAccessPoint(AccessPoint):
-    """Handles a single access point on AWS""""
+    """Handles a single access point on AWS"""
     
-    def __init__(self, s3_pointer, url=None, profile=None):
+    def __init__(self, s3_pointer, profile=None, region=None):
         """An access point for aws
         
         Parameters
         ----------
-        s3_pointer: str or a list of str:
+        s3_pointer : str or a list of str:
             either an s3_uri (s3://..) or a pair of (bucket_name, key) 
-        url : str
-            the url of the on-prem data to be used as a fallback.
         profile : str
             name of the user's profile for credentials in ~/.aws/config
             or ~/.aws/credentials. Use to authenticate the AWS user with boto3.
-        
+        region : str
+            region of the bucket.
         """
         
-        super().__init__(url)
+        super().__init__(url=None)
         self.type = 'aws'
         
         # check input 
@@ -106,7 +106,7 @@ class AWSAccessPoint(AccessPoint):
             uri = s3_pointer
             s3_s = uri.split('/')
             bucket, key = s3_s[2], '/'.join(s3_s[3:])
-        elif isintance(s3_pointer, (list, tuple, set)):
+        elif isinstance(s3_pointer, (list, tuple, set)):
             if len(s3_pointer) != 2:
                 raise ValueError(f'{s3_pointer} should contain (bucket_name, key)')
             bucket, key = s3_pointer
@@ -116,12 +116,63 @@ class AWSAccessPoint(AccessPoint):
         self.s3_uri = uri
         self.s3_bucket_name = bucket
         self.s3_key = key
+        self.region = region
         
         # construct a boto3 s3 resource object
         self.s3_resource = self._build_s3_resource(profile)
+    
+    @staticmethod
+    def from_json(aws_json, profile=None):
+        """Construct an AWSAccessPoint instance from the json text in 
+        a cloud_access column
+        
+        Parameters
+        ----------
+        aws_json: str
+            A string of the json text that contains the aws access information
+        profile : str
+            name of the user's profile for credentials in ~/.aws/config
+            or ~/.aws/credentials. Use to authenticate the AWS user with boto3.
+            
+        Returns:
+        a list of AWSAccessPoint instances
+        
+        """
+        
+        # read json provided by the archive server
+        cloud_access = json.loads(aws_json)
+        
+        if not 'aws' in cloud_access:
+            raise ValueError('There is no aws entry in the json text')
+        
+            
+        # do we have multiple aws access points?
+        aws_access = cloud_access['aws']
+        if isinstance(aws_access, dict):
+            aws_access = [aws_access]
+        
+        # we should have list. If not, fail
+        if not isinstance(aws_access, list):
+            raise ValueError(
+                f'aws entry can be either a dict or a list of dict. '
+                'Found {type(aws_access)}'
+            )
+            
+        aws_access_points = []
+        for aws_info in aws_access:
+            
+            # region and access mode
+            bucket = aws_info['bucket_name']
+            key    = aws_info['key']
+            region = aws_info.get('region', None)
+            
+            s3_pointer = (bucket, key)
+            aws_access_points.append(AWSAccessPoint(s3_pointer, profile=profile, region=region))
+            
+        return aws_access_points
         
         
-    def _build_s3_resource(profile):
+    def _build_s3_resource(self, profile):
         """Construct a boto3 s3 resource
         
         Parameters:
@@ -145,6 +196,7 @@ class AWSAccessPoint(AccessPoint):
     
     
     
+    
     def is_accessible(self):
         """Check if the aws endpoint is accessible
         
@@ -158,12 +210,12 @@ class AWSAccessPoint(AccessPoint):
         """
         if self._accessible is None:
             
-            s3_client = s3_resource.meta.client
+            s3_client = self.s3_resource.meta.client
             try:
                 header_info = s3_client.head_object(Bucket=self.s3_bucket_name, Key=self.s3_key)
                 accessible, msg = True, ''
             except Exception as e:
-                self._accessible = False
+                accessible = False
                 msg = str(e)
             self._accessible = (accessible, msg)
                 
@@ -232,19 +284,76 @@ class AWSAccessPoint(AccessPoint):
         return local_path
     
     
+class AccessManager:
+    """AccessPoint container and manager"""
+    
+    def __init__(self, base_access):
+        """Initilize an AccessManager with a basic AccessPoint.
+        
+        Parameters
+        ----------
+        base_access: AccessPoint
+            a minimum access point with a simple url.
+        
+        """
+        
+        if not isinstance(base_access, AccessPoint):
+            raise ValueError(
+                f'type(base_access) is expected with be AccessApoint not {type(base_access)}'
+            )
+        
+        self.access_points = {base_access.type: [base_access]}
+        
+        # the default is the one to use. One of access_points
+        self.default_access_point = {base_access.type: base_access}
+        
+    
+    def add_access_point(self, access_point):
+        """Add a new AccessPoint to the manager
+        
+        Parameters:
+        -----------
+        access_point: AccessPoint, a subclass, or a list of them.
+            the access point to be added to the manager
+                
+        """
+        
+        # if a list, loop through the elements
+        if isinstance(access_point, list):
+            for ap in access_point:
+                self.add_access_point(ap)
+        else:
+            if not isinstance(access_point, AccessPoint):
+                raise ValueError(
+                    f'type(base_access) is expected with be AccessApoint, '
+                    f'a subclass or a list not {type(base_access)}'
+                )
+
+            ap_type = access_point.type
+            if not ap_type in self.access_points:
+                self.access_points[ap_type] = []
+            self.access_points[ap_type].append(access_point)
+        
+
+        
+    
+    
     
 class DataHandler:
     """A container for multiple AccessPoint instances"""
     
-    def __init__(self, data_product):
+    def __init__(self, data_product, **kwargs):
         """
         Parameters
         ----------
         data_product: astropy.table or pyvo.dal.DALResults
         
+        kwargs: keywrods arguments used to initialize the AccessPoint
+            instance or its subclasses.
+        
         """
         
-        if not isinstance(dal_result, (pyvo.dal.DALResults, Table)):
+        if not isinstance(data_product, (pyvo.dal.DALResults, Table)):
             raise ValueError(f'data_prodcut should be either '
                               'astropy.table.Table or '
                               'pyvo.dal.DALResults')
@@ -267,11 +376,36 @@ class DataHandler:
             else:
                 # try by ucd as a final resort
                 url_colname = dal_result.fieldname_with_ucd('meta.ref.url')
-        7y
+        
         # if still None, raise
         # TODO allow the user the pass the name to avoid failing
         if url_colname is None:
             raise ValueError(f'Could not figure out the column with direct access url')
         
-        # base AccessPoint
+        # AccessPoint
+        # - self.access_points: some type of ap manager (could be a simple container; e.g. list)
+        # - each row has its access_points manager.
+        # - If we have a cloud_access column, use it. it is easier than datalinks as it does not
+        # require a new call to server.
+        # - elif we have datalinks, get all data links in one call, then pass on to AWS ap.
+        # - else: no aws info; fall back to on-prem
+        
+        # minimum access point that uses on-prem data
+        self.nrows = len(dal_result)
+        self.access_manager = [AccessManager(AccessPoint(url)) for url in dal_result[url_colname]]
+        
+        # if there is a 'cloud_access' json column, use it
+        if 'cloud_access' in dal_result.fieldnames:
+            profile = kwargs.get('profile', None)
+            
+            for irow in range(self.nrows):
+                jsontxt = dal_result[irow]['cloud_access']
+                awsAp = AWSAccessPoint.from_json(jsontxt, profile=profile)
+                self.access_manager[irow].add_access_point(awsAp)
+                
+        
+            
+            
+        from IPython import embed;embed();exit(0)
+        base_ap = [AccessPoint(url) for url in dal_result[url_colname]]
         base_ap = AccessPoint()
