@@ -9,6 +9,7 @@ import numpy as np
 
 from astropy.utils.data import download_file
 from astropy.utils.console import ProgressBarOrSpinner
+import pyvo
 
 import boto3
 import botocore
@@ -117,7 +118,7 @@ class AWSDataHandler(DataHandler):
 
         Parameters
         ----------
-        product : astropy.table.Row.
+        product : astropy.table.Row or (a subclass of) pyvo.dal.Record if datalinks are to be used.
             aws-s3 information should be available in product['cloud_access'],
             otherwise, fall back to on-prem using product[access_url_column]
         access_url_column : str
@@ -352,22 +353,74 @@ class AWSDataHandler(DataHandler):
         }
 
         try:
-            # do we have cloud_access info in the data product?
-            if 'cloud_access' not in self.product.keys():
-                msg = 'Input product does not have any cloud access information.'
-                raise AWSDataHandlerError(msg)
+            
+            # if self.product is a (subclass of) pyvo pyvo.dal.Record, 
+            # lets try datalinks
+            # TODO: also handle pyvo.dal.DALResults (i.e. many Records) 
+            use_datalinks = False
+            if isinstance(self.product, pyvo.dal.Record):
+                dlink_resource = self.product._results.get_adhocservice_by_ivoid(pyvo.dal.adhoc.DATALINK_IVOID)
 
-            # read json provided by the archive server
-            cloud_access = json.loads(self.product['cloud_access'])
+                # Look for the 'source' <PARAM> element inside the inputParams <GROUP> element.
+                # pyvo already handles part of this.
+                source_elems = [p for p in dlink_resource.groups[0].entries if p.name == 'source']
+                
+                # proceed only if we have a PARAM named source, 
+                # otherwise, look for the cloud_access column
+                if len(source_elems) != 0:
+                    # we have a source parameters, process it
+                    source_elem  = source_elems[0] 
+                    
+                    # list the available options in the `source` element:
+                    access_options = source_elem.values.options
+                    aws_info = []
+                    for opt in access_options:
+                        sopt = opt[1].split(':')
+                        if sopt[0] == 'aws':
+                            
+                            # do a datalink call:
+                            log.info(f'doing a datalink request for {opt[1]}')
+                            query = pyvo.dal.adhoc.DatalinkQuery.from_resource(
+                                    self.product, dlink_resource, self.product._results._session, 
+                                    source=opt[1]
+                                )
+                            dl_result = query.execute()
+                            url = dl_result[0].access_url.split('/')
+                            bucket_name = url[2]
+                            key = '/' + ('/'.join(url[3:]))
+                            region = sopt[1]
+                            aws_info.append({
+                                'bucket_name': bucket_name,
+                                'region': region,
+                                'key': key,
+                                # TODO: find a way to handle `access`
+                                'access': 'region',
+                            })
+                    # if we have populated aws_info, then we proceed with datalinks
+                    # otherwise, fall back to the cloud_access json column
+                    if len(aws_info):
+                        use_datalinks = True
+            
+            # we do this part only when we don't have datalinks
+            if not use_datalinks:
+                
+                # do we have cloud_access info in the data product?
+                if 'cloud_access' not in self.product.keys():
+                    msg = 'Input product does not have any cloud access information.'
+                    raise AWSDataHandlerError(msg)
 
-            # do we have information specific to aws in the data product?
-            if 'aws' not in cloud_access:
-                msg = 'No aws cloud access information in the data product.'
-                raise AWSDataHandlerError(msg)
+                # read json provided by the archive server
+                cloud_access = json.loads(self.product['cloud_access'])
 
-            # we have info about data in aws; validate it first #
-            aws_info = cloud_access['aws']
+                # do we have information specific to aws in the data product?
+                if 'aws' not in cloud_access:
+                    msg = 'No aws cloud access information in the data product.'
+                    raise AWSDataHandlerError(msg)
 
+                # we have info about data in aws; validate it first #
+                aws_info = cloud_access['aws']
+
+            
             if isinstance(aws_info, list) and len(aws_info) == 1:
                 aws_info = aws_info[0]
 

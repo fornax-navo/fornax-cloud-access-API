@@ -14,14 +14,15 @@ print(f'\nUsing fornax library in: {fornax.__file__}\n')
 pos = coord.SkyCoord.from_name("ngc 4151")
 
 # chandra #
-#query_url = 'https://heasarc.gsfc.nasa.gov/xamin_aws/vo/sia?table=chanmaster&'
+query_url = 'https://heasarc.gsfc.nasa.gov/xamin_aws/vo/sia?table=chanmaster&'
 
 # hst #
-query_url = 'https://mast.stsci.edu/portal_vo/Mashup/VoQuery.asmx/SiaV1?MISSION=HST&'
+#query_url = 'https://mast.stsci.edu/portal_vo/Mashup/VoQuery.asmx/SiaV1?MISSION=HST&'
 
 query_result = pyvo.dal.sia.search(query_url, pos=pos, size=0.0)
 table_result = query_result.to_table()
 access_url_column = query_result.fieldname_with_ucd('VOX:Image_AccessReference')
+
 
 
 # data handler
@@ -55,4 +56,7 @@ myprofile = None
 #    'bucket', 'bucket_name').replace('path', 'key')
 
 # attemp to access the data.
-fornax.get_data_product(data_product, 'aws', access_url_column=access_url_column, profile=myprofile)
+#fornax.get_data_product(data_product, 'aws', access_url_column=access_url_column, profile=myprofile)
+
+# pass a pyvo.dal.Record object to use datalinks
+fornax.get_data_product(query_result[0], 'aws', access_url_column=access_url_column, profile=myprofile)
