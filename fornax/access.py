@@ -95,40 +95,39 @@ class AccessManager:
 class DataHandler:
     """A container for multiple AccessPoint instances"""
     
-    def __init__(self, 
-                 data_product, 
-                 source='prem', 
-                 fallback=True, 
-                 url_column=None,
-                 **kwargs
-                ):
+    def __init__(self, data_product, url_column=None, **kwargs):
         """
         Parameters
         ----------
         data_product: astropy.table or pyvo.dal.DALResults
             The data to be accessed or downloaded
-        source: str
-            The source of the data. prem | aws
-        fallback: bool
-            Fallback to prem if other source fail
         url_column: str or None
             Name of the column that contains the direct url.
             If None, attempt to figure it out following VO standards
-        
-        kwargs: keywrods arguments used to initialize the AccessPoint
-            instance or its subclasses.
+            
+        Keywords:
+        ---------
+            meta data needed to download the data, such as authentication profile
+            which will be used to create access points. 
+            
+            prem:
+                No keywords needed
+            aws:
+                aws_profile : str
+                    name of the user's profile for credentials in ~/.aws/config
+                    or ~/.aws/credentials. Use to authenticate the AWS user with boto3.
         
         """
         
+        # we expecting an astropy.Table or pyvo.dal.DALResults
         if not isinstance(data_product, (pyvo.dal.DALResults, Table)):
             raise ValueError(f'data_prodcut should be either '
                               'astropy.table.Table or '
                               'pyvo.dal.DALResults')
-            
-        if source not in class_mapper.keys():
-            raise ValueError(f'Expected prem or aws for source. Found {source}')
+        
         
         # if we have an astropy table, convert to a pyvo.dal.DALResults
+        # TODO: this may not work all the time.
         if isinstance(data_product, Table):
             vot = votable.from_table(data_product)
             dal_product = pyvo.dal.DALResults(vot)  
@@ -150,10 +149,26 @@ class DataHandler:
                 else:
                     # try by ucd as a final attempt
                     url_column = dal_product.fieldname_with_ucd('meta.ref.url')
+                    
+        ## If still no url_column, fail
+        if url_column is None:
+            raise ValueError(f'No url_column given.')
         
-        # base prem access point
-        access_manager = [AccessManager(AccessPoint(url)) for url in dal_product[url_column]]
+        
+        # extract any access meta information from kwargs
+        access_meta = {}
+        for ap_name,apClass in class_mapper.items():
+            access_meta[ap_name] = apClass.access_meta(**kwargs)
+        self.access_meta = access_meta
+        
+        
+        # a base prem access point
+        access_manager = [
+            AccessManager(AccessPoint(url, **access_meta['prem'])) for url in dal_product[url_column]
+        ]
         self.access_manager = access_manager
+        self.nrows = len(access_manager)
+        
         
         ## ------------------- ##
         ## other access points ##
@@ -200,7 +215,12 @@ class DataHandler:
                 # TEMPORARY
                 if 'access' in desc[ap_name]:
                     del desc[ap_name]['access']
-                new_ap = APclass(**desc[ap_name])
+                    
+                # access point parameters
+                ap_params = desc[ap_name]
+                # add access meta data, if any
+                ap_params.update(self.access_meta[ap_name])
+                new_ap = APclass(**ap_params)
                 self.access_manager[irow].add_access_point(new_ap)
                 
     
@@ -256,10 +276,67 @@ class DataHandler:
                 dl_table = dl_result.to_table()
                 
                 ap_type = option.split(':')[0]
-                ApClass = class_mapper[ap_type]
-                for irow in range(len(dal_product)):
-                    dl_res = dl_table[dl_table['ID'] == dal_product[dl_col_name[0]][irow]]
-                    for dl_row in dl_res:
-                        ap = ApClass(uri=dl_row['access_url'])
-                        self.access_manager[irow].add_access_point(ap)
-                                
+                if ap_type in class_mapper.keys():
+                    ApClass = class_mapper[ap_type]
+                    ap_meta = self.access_meta[ap_type]
+                    for irow in range(len(dal_product)):
+                        dl_res = dl_table[dl_table['ID'] == dal_product[dl_col_name[0]][irow]]
+                        for dl_row in dl_res:
+                            ap = ApClass(uri=dl_row['access_url'], **ap_meta)
+                            self.access_manager[irow].add_access_point(ap)
+    
+    
+    def download(self, source, fallback=True, **kwargs):
+        """Download data from source
+        
+        Parameters
+        ----------
+        source: str
+            The source of the data. prem | aws, etc.
+        fallback: bool
+            Fallback to prem if other source fail
+            
+        Keywords:
+        dryrun: bool
+            If True, prepare for download and print the result without
+            downloading the files
+        
+        """
+        
+        dryrun = kwargs.get('dryrun', False)
+        
+        # the data sources we expect
+        if source not in class_mapper.keys():
+            raise ValueError(f'Expected prem or aws for source. Found {source}')
+            
+        # For each row, loop through the access points, and return
+        # the first accessible one.
+        
+        local_paths = []
+        for irow in range(self.nrows):
+            access_point = None
+            for _ap in self[irow].access_points[source]:
+                if _ap.is_accessible():
+                    access_point = _ap
+                    break
+            
+            # if source is not prem, and ap is still None,
+            # fallback to prem if requested
+            if source != 'prem' and access_point is None and fallback:
+                for _ap in self[irow].access_points['prem']:
+                    if _ap.is_accessible():
+                        access_point = _ap
+                        break
+            
+            # proceed with download if we have a valid accesspoint
+            path = None
+            if access_point is not None:
+                if dryrun:
+                    path = access_point.id
+                else:
+                    path = access_point.download()
+            local_paths.append(path)
+        
+        return local_paths
+        
+        

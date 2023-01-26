@@ -35,7 +35,7 @@ class AccessPoint:
         ----------
         cache : bool
             Default is True. If file is found on disc it will not be downloaded again.
-            
+        
             
         Return
         ------
@@ -56,6 +56,12 @@ class AccessPoint:
     def is_accessible(self):
         """Check if the url is accessible
         
+        Parameters:
+        -----------
+        meta: dict or None
+            meta data needed to download the data, such as authentication profile
+            Not needed in this case, but can be used by subclassess
+        
         Return
         ------
         (accessible, msg) where accessible is a bool and msg is the failure message
@@ -69,3 +75,16 @@ class AccessPoint:
                 msg = response.reason
             self._accessible = (accessible, msg)
         return self._accessible
+    
+    
+    @staticmethod
+    def access_meta(**kwargs):
+        """Extract access metadata from the user-supplied list of keywords.
+        The result is to be passed to download and is_accessible methods
+        
+        Returns:
+        meta: dict
+            a dictionary of access meta data, such authentication
+            that will be passed to the class initializer
+        """
+        return {}

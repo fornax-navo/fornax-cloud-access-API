@@ -21,7 +21,7 @@ class AWSAccessPoint(AccessPoint):
                  key = None,
                  uri = None,
                  region = None,
-                 profile = None
+                 **kwargs
                 ):
         """Define an access point for aws.
         Either uri or both bucket_name/key need to be given
@@ -34,14 +34,18 @@ class AWSAccessPoint(AccessPoint):
             the key or path to the file/directory location
         region : str
             region of the bucket.
-        profile : str
+            
+        Keywords:
+        ---------
+        meta data needed to download the data, such as authentication profile
+        
+        aws_profile : str
             name of the user's profile for credentials in ~/.aws/config
             or ~/.aws/credentials. Use to authenticate the AWS user with boto3.
-        
+            When authenticating in aws, either aws_profile, or a s3_resource is needed
         
         """
         
-        super().__init__(url=None)
         
         # check input 
         if uri is None and (bucket_name is None or key is None):
@@ -71,8 +75,10 @@ class AWSAccessPoint(AccessPoint):
         self.s3_key = key
         self.region = region
         self.id = uri
+        self._accessible = None
         
-        # construct a boto3 s3 resource object
+        # prepare the s3 resource
+        profile = kwargs.get('aws_profile', None)
         self.s3_resource = self._build_s3_resource(profile)
     
     
@@ -117,7 +123,7 @@ class AWSAccessPoint(AccessPoint):
         
         """
         if self._accessible is None:
-            
+        
             s3_client = self.s3_resource.meta.client
             try:
                 header_info = s3_client.head_object(Bucket=self.s3_bucket_name, Key=self.s3_key)
@@ -141,8 +147,9 @@ class AWSAccessPoint(AccessPoint):
         ----------
         cache : bool
             Default is True. If file is found on disc it will not be downloaded again.
+            
         """
-
+        
         s3 = self.s3_resource
         s3_client = s3.meta.client
 
@@ -190,3 +197,23 @@ class AWSAccessPoint(AccessPoint):
 
             bkt.download_file(key, local_path, Callback=progress_callback)
         return local_path
+    
+    
+    @staticmethod
+    def access_meta(**kwargs):
+        """Extract access metadata from the user-supplied list of keywords.
+        The result is to be passed to download and is_accessible methods
+        
+        Returns:
+        meta: dict
+            a dictionary of access meta data, such authentication
+            that will be passed to the class initializer
+            
+        aws_profile : str
+            name of the user's profile for credentials in ~/.aws/config
+            or ~/.aws/credentials. Use to authenticate the AWS user with boto3.
+        """
+        
+        profile = kwargs.get('aws_profile', None)
+        
+        return dict(aws_profile=profile)
