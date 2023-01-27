@@ -7,6 +7,11 @@ from astropy.io import votable
 from .prem import AccessPoint
 from .aws import AWSAccessPoint
 
+import logging
+logging.basicConfig(format="%(asctime)s | %(name)s | %(message)s", datefmt="%H:%M:%S")
+log = logging.getLogger('fornax')
+log.setLevel(logging.DEBUG)
+
 
 __all__ = ['AccessManager', 'DataHandler']
 
@@ -39,8 +44,6 @@ class AccessManager:
         
         self.access_points = {access_point.name: [access_point]}
         
-        # the default is the one to use. One of access_points
-        self.default_access_point = {access_point.name: access_point}
     
     
     def __repr__(self):
@@ -80,6 +83,7 @@ class AccessManager:
                 self.access_points[ap_name] = []
             if not access_point.id in self.ids:
                 self.access_points[ap_name].append(access_point)
+                log.debug(f'adding access point {str(access_point)}')
     
     
     def summary(self):
@@ -121,6 +125,7 @@ class DataHandler:
         
         # we expecting an astropy.Table or pyvo.dal.DALResults
         if not isinstance(data_product, (pyvo.dal.DALResults, Table)):
+            log.debug(f'Unknown data product type {type(data_product)}')
             raise ValueError(f'data_prodcut should be either '
                               'astropy.table.Table or '
                               'pyvo.dal.DALResults')
@@ -129,6 +134,7 @@ class DataHandler:
         # if we have an astropy table, convert to a pyvo.dal.DALResults
         # TODO: this may not work all the time.
         if isinstance(data_product, Table):
+            log.debug(f'Creating a pyvo DALResults from astropy Table')
             vot = votable.from_table(data_product)
             dal_product = pyvo.dal.DALResults(vot)  
         else:
@@ -142,13 +148,16 @@ class DataHandler:
         if url_column is None:
             # SIA v1
             url_column = dal_product.fieldname_with_ucd('VOX:Image_AccessReference')
+            log.debug(f'Extracting SIA v1 url column: {url_column}')
             if url_column is None:
                 # SIA v2
                 if 'access_url' in dal_product.fieldnames:
                     url_column = 'access_url'
+                    log.debug(f'Extracting SIA v2 url column: {url_column}')
                 else:
                     # try by ucd as a final attempt
                     url_column = dal_product.fieldname_with_ucd('meta.ref.url')
+                    log.debug(f'Extracting url column from ucd: {url_column}')
                     
         ## If still no url_column, fail
         if url_column is None:
@@ -168,6 +177,7 @@ class DataHandler:
         ]
         self.access_manager = access_manager
         self.nrows = len(access_manager)
+        log.debug(f'There are {self.nrows} rows in the data product')
         
         
         ## ------------------- ##
@@ -199,8 +209,11 @@ class DataHandler:
         
         """
         
+        log.debug(f'Processing cloud information in the json column {colname} ...')
+        
         # if no cloud_access column, there is nothing to do
         if colname not in dal_product.fieldnames: 
+            log.debug(f'The json column {colname} does not exist')
             return
         
         for irow, jsontxt in enumerate(dal_product[colname]):
@@ -235,17 +248,15 @@ class DataHandler:
             
         """
         
+        log.debug(f'Processing datalinks ...')
+        
         # do we have datalinks?
         try:
             dlinks = dal_product.get_adhocservice_by_ivoid(
                 pyvo.dal.adhoc.DATALINK_IVOID
             )
         except (pyvo.DALServiceError, AttributeError) as err:
-            # TODO: log the error
-            dlinks = None
-        
-        # if no datalinks, there is nothing to do here
-        if dlinks is None:
+            log.debug(f'No datalink service found: {str(err)}')
             return
         
         # input parameters for the datalink call
@@ -262,6 +273,8 @@ class DataHandler:
             # list the available options in the `source` element:
             access_options = source_elem.values.options
             for description,option in access_options:
+                
+                log.debug(f'-- datalink option: {option}: {description}')
                 
                 # TEMPORARY
                 option = option.replace('main-server', 'prem')

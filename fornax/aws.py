@@ -83,7 +83,8 @@ class AWSAccessPoint(AccessPoint):
     
     
     def __repr__(self):
-        return f'|{self.name.ljust(5)}| {self.s3_uri}'
+        #return f'|{self.name.ljust(5)}| {self.s3_uri}'
+        return f'|{self.name.ljust(5)}| s3://{self.s3_bucket_name}/.../{self.s3_key.split("/")[-1]}'
         
         
     def _build_s3_resource(self, profile):
