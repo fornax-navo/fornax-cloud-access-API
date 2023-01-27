@@ -240,7 +240,8 @@ class DataHandler:
             dlinks = dal_product.get_adhocservice_by_ivoid(
                 pyvo.dal.adhoc.DATALINK_IVOID
             )
-        except pyvo.DALServiceError:
+        except (pyvo.DALServiceError, AttributeError) as err:
+            # TODO: log the error
             dlinks = None
         
         # if no datalinks, there is nothing to do here
