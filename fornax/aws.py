@@ -73,7 +73,7 @@ class AWSAccessPoint(AccessPoint):
         self._accessible = None
         
         # prepare the s3 resource
-        self.s3_resource = self._build_s3_resource(profile)
+        self.s3_resource = self._build_s3_resource(aws_profile)
     
     
     def __repr__(self):
