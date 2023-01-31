@@ -21,7 +21,7 @@ class AWSAccessPoint(AccessPoint):
                  key = None,
                  uri = None,
                  region = None,
-                 **kwargs
+                 aws_profile = None
                 ):
         """Define an access point for aws.
         Either uri or both bucket_name/key need to be given
@@ -34,11 +34,6 @@ class AWSAccessPoint(AccessPoint):
             the key or path to the file/directory location
         region : str
             region of the bucket.
-            
-        Keywords:
-        ---------
-        meta data needed to download the data, such as authentication profile
-        
         aws_profile : str
             name of the user's profile for credentials in ~/.aws/config
             or ~/.aws/credentials. Use to authenticate the AWS user with boto3.
@@ -78,7 +73,6 @@ class AWSAccessPoint(AccessPoint):
         self._accessible = None
         
         # prepare the s3 resource
-        profile = kwargs.get('aws_profile', None)
         self.s3_resource = self._build_s3_resource(profile)
     
     
