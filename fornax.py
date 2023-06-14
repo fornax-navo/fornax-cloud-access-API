@@ -172,14 +172,14 @@ class AWSDataHandler(DataHandler):
 
         meta_keys = list(info.keys())
         msg0 = ' Failed to process cloud metadata: '
-        
+
         # check for required keys
         required_keys = ['region', 'access', 'bucket_name', 'key']
         for req_key in required_keys:
             if not req_key in meta_keys:
                 msg = f'{req_key} value is missing from the cloud_acess column.'
                 raise AWSDataHandlerError(msg0 + msg)
-        
+
         # extra checks: access has to be one of these values
         accepted_access = ['open', 'region', 'restricted', 'none']
         access = info['access']
@@ -353,10 +353,10 @@ class AWSDataHandler(DataHandler):
         }
 
         try:
-            
-            # if self.product is a (subclass of) pyvo pyvo.dal.Record, 
+
+            # if self.product is a (subclass of) pyvo pyvo.dal.Record,
             # lets try datalinks
-            # TODO: also handle pyvo.dal.DALResults (i.e. many Records) 
+            # TODO: also handle pyvo.dal.DALResults (i.e. many Records)
             use_datalinks = False
             if isinstance(self.product, pyvo.dal.Record):
                 dlink_resource = self.product._results.get_adhocservice_by_ivoid(pyvo.dal.adhoc.DATALINK_IVOID)
@@ -364,24 +364,24 @@ class AWSDataHandler(DataHandler):
                 # Look for the 'source' <PARAM> element inside the inputParams <GROUP> element.
                 # pyvo already handles part of this.
                 source_elems = [p for p in dlink_resource.groups[0].entries if p.name == 'source']
-                
-                # proceed only if we have a PARAM named source, 
+
+                # proceed only if we have a PARAM named source,
                 # otherwise, look for the cloud_access column
                 if len(source_elems) != 0:
                     # we have a source parameters, process it
-                    source_elem  = source_elems[0] 
-                    
+                    source_elem  = source_elems[0]
+
                     # list the available options in the `source` element:
                     access_options = source_elem.values.options
                     aws_info = []
                     for opt in access_options:
                         sopt = opt[1].split(':')
                         if sopt[0] == 'aws':
-                            
+
                             # do a datalink call:
                             log.info(f'doing a datalink request for {opt[1]}')
                             query = pyvo.dal.adhoc.DatalinkQuery.from_resource(
-                                    self.product, dlink_resource, self.product._results._session, 
+                                    self.product, dlink_resource, self.product._results._session,
                                     source=opt[1]
                                 )
                             dl_result = query.execute()
@@ -400,10 +400,10 @@ class AWSDataHandler(DataHandler):
                     # otherwise, fall back to the cloud_access json column
                     if len(aws_info):
                         use_datalinks = True
-            
+
             # we do this part only when we don't have datalinks
             if not use_datalinks:
-                
+
                 # do we have cloud_access info in the data product?
                 if 'cloud_access' not in self.product.keys():
                     msg = 'Input product does not have any cloud access information.'
@@ -420,7 +420,7 @@ class AWSDataHandler(DataHandler):
                 # we have info about data in aws; validate it first #
                 aws_info = cloud_access['aws']
 
-            
+
             if isinstance(aws_info, list) and len(aws_info) == 1:
                 aws_info = aws_info[0]
 
@@ -517,7 +517,11 @@ class AWSDataHandler(DataHandler):
                 self._download_file_s3(data_info, **kwargs)
         else:
             log.info('--- Downloading data from On-prem ---')
-            download_file(data_info['access_url'])
+
+            # workaround, astropy.utils.data.download_file returns the location of the
+            # temp file with no control over local_path.
+            # TODO: We should pull out the download_file method from the astroquery base class instead.
+            return download_file(data_info['access_url'])
 
     def length_file_s3(self):
         """
