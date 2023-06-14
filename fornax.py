@@ -501,7 +501,7 @@ class AWSDataHandler(DataHandler):
             access_points = data_info['access_points']
             if len(access_points) != 1 and access_point not in [0, data_info['s3_bucket_name']]:
                 # access_point as index
-                if isinstance(access_point, [int, np.int32, np.int64]):
+                if isinstance(access_point, int):
                     data_info.update(access_points[access_point])
 
                 # access_point as bucket_name
@@ -512,9 +512,9 @@ class AWSDataHandler(DataHandler):
                                           'match any access point'))
                     data_info.update(access_point_info[0])
 
-                log.info('--- Downloading data from S3 ---')
-                # proceed to actual download
-                self._download_file_s3(data_info, **kwargs)
+            log.info('--- Downloading data from S3 ---')
+            # proceed to actual download
+            self._download_file_s3(data_info, **kwargs)
         else:
             log.info('--- Downloading data from On-prem ---')
 
