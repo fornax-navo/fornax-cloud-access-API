@@ -44,6 +44,7 @@ if test_download:
     print(s3_uri)
     aws_download(s3_uri)
     exit(0)
+from IPython import embed; embed();exit(0)
 ## -------------------------------- ##
 
 
