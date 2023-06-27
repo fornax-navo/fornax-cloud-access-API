@@ -14,7 +14,98 @@ from .download import http_download, aws_download
 # JSON_COLUMN is the name of the column that contain the cloud json text
 JSON_COLUMN = 'cloud_access'
 
-__all__ = ['ProviderHandler', '_process_json_column', '_process_ucd_column', '_process_cloud_datalinks']
+# supported providers & their parameters
+PROVIDERS = {
+    'prem': ['url'],
+    'aws' : ['uri', 'bucket_name', 'key']
+}
+
+
+__all__ = ['ProviderHandler', 'find_product_access']
+
+
+
+def find_product_access(product, provider, mode='all', urlcolumn='auto', verbose=False, **kwargs):
+    """Search for data product access information in some data product.
+
+    This finds all available access information from prem, aws etc.
+
+    Parameters
+    ----------
+    product: Record, DALResults, astropy Table or Row
+        The data product.
+    provider: str
+        name of data provider: prem, aws, etc.
+    mode: str
+        The mode to use. Options include: json, datalink, ucd, or all.
+    urlcolumn: str
+            The name of the column that contains the url link to on-prem data.
+            If 'auto', try to find the url by:
+                - use getdataurl if product is either Record or DALResults
+                - Use any column that contain http links if product is Row or Table.
+    verbose: bool
+        If True, print progress and debug text
+
+    Keywords
+    --------
+    meta data needed to download the data, such as authentication profile
+    which will be used to create access points. 
+
+    prem:
+        No keywords needed
+    aws:
+        aws_profile : str
+            name of the user's profile for credentials in ~/.aws/config
+            or ~/.aws/credentials. Use to authenticate the AWS user with boto3.
+    
+    Return
+    ------
+    ...
+
+    """
+
+    # check product
+    if not isinstance(product, (Record, DALResults, Table, Row)):
+        raise ValueError((
+            f'product has the wrong type. Expecting dal.Record, '
+            f'dal.DALResults, Table or Row. Found {type(product)}'
+        ))
+
+    if provider not in PROVIDERS:
+        raise ValueError(f'provider {provider} is not supported. See PROVIDERS')
+
+    # check mode
+    if mode not in ['json', 'datalink', 'ucd', 'all']:
+        raise ValueError((
+            'mode has to be one of json, datalink, ucd or all'
+        ))
+
+    # convert product as a list of rows
+    if isinstance(product, (Record, Row)):
+        rows = [product]
+    else:
+        rows = [_ for _ in product]
+
+    json_ap = [[] for _ in rows]
+    if mode in ['json', 'all']:
+        json_ap = _process_json_column(rows, provider, verbose=verbose)
+
+    ucd_ap = [[] for _ in rows]
+    if mode in ['ucd', 'all']:
+        ucd_ap = _process_ucd_column(rows, provider, verbose=verbose)
+
+    dl_ap = [[] for _ in rows]
+    if mode in ['datalink', 'all']:
+        dl_ap = _process_cloud_datalinks(rows, provider, verbose=verbose)
+
+    # put them in one list of nrow lists of access points
+    ap_list = [json_ap[irow] + ucd_ap[irow] + dl_ap[irow]
+                  for irow in range(len(rows))]
+
+    if isinstance(product, (Record, Row)):
+        ap_list = ap_list[0]
+
+    return ap_list
 
 
 class ProviderHandler(UserDict):
@@ -29,16 +120,10 @@ class ProviderHandler(UserDict):
     
     """
 
-    # supported providers & their parameters
-    PROVIDERS = {
-        'prem': ['url'],
-        'aws' : ['uri', 'bucket_name', 'key']
-    }
-
     def __init__(self):
         """Initialize each provider with an empty list"""
         super(ProviderHandler, self).__init__()
-        for provider, params in self.PROVIDERS.items():
+        for provider, params in PROVIDERS.items():
             self.data[provider] = []
 
     def __repr__(self):
@@ -78,10 +163,10 @@ class ProviderHandler(UserDict):
             If True, print progress and debug text
         
         Other parameters needed for each provider.
-        The list is in the values of Provider.PROVIDERS
+        The list is in the values of PROVIDERS
         
         """
-        if not provider in self.PROVIDERS:
+        if provider not in PROVIDERS:
             raise ValueError(f'provider: {provider} is not supported')
         
         verbose = kwargs.pop('verbose', False)
@@ -89,10 +174,10 @@ class ProviderHandler(UserDict):
         if access_id is not None:
             if not isinstance(access_id, str):
                 raise ValueError('access_id has to be a str')
-            kwargs[self.PROVIDERS[provider][0]] = access_id
+            kwargs[PROVIDERS[provider][0]] = access_id
         
         # if 'access_id' already exists; skip
-        access_id = kwargs.get(self.PROVIDERS[provider][0], None)
+        access_id = kwargs.get(PROVIDERS[provider][0], None)
         if access_id is not None:
             for link in self[provider]:
                 if access_id == link[0]:
@@ -101,9 +186,9 @@ class ProviderHandler(UserDict):
                     return
         
         
-        params = [kwargs.get(par, None) for par in self.PROVIDERS[provider]]
+        params = [kwargs.get(par, None) for par in PROVIDERS[provider]]
         if all([_ is None for _ in params]):
-            require_p = ', '.join(self.PROVIDERS[provider])
+            require_p = ', '.join(PROVIDERS[provider])
             raise ValueError(f'Wrong parameter. Parameters for {provider} are: {require_p}')
         else:
             self[provider].append(params)
@@ -145,7 +230,7 @@ class ProviderHandler(UserDict):
             raise ValueError(f'Unsupported provider {provider}')
         download_func  = download[provider]
         download_links = self[provider]
-        func_keys = self.PROVIDERS[provider]
+        func_keys = PROVIDERS[provider]
         
         errors = ''
         for link in download_links:
@@ -189,15 +274,15 @@ def _process_json_column(products, provider, colname=JSON_COLUMN, verbose=False)
     
     Return
     ------
-    A dict of parameters for every row in products
+    A dict or a list of dict of parameters for every row in products
     
     
     """
     if not isinstance(products, list):
         raise ValueError('products is expected to be a list')
     
-    if not provider in ProviderHandler.PROVIDERS:
-        raise ValueError(f'provider {provider} is not supported. See ProviderHandler.PROVIDERS')
+    if provider not in PROVIDERS:
+        raise ValueError(f'provider {provider} is not supported. See PROVIDERS')
     
     if verbose:
         print(f'searching for and processing json column {colname}')
@@ -219,7 +304,7 @@ def _process_json_column(products, provider, colname=JSON_COLUMN, verbose=False)
         
         jsonDict = json.loads(jsontxt)
         
-        params = ProviderHandler.PROVIDERS[provider]
+        params = PROVIDERS[provider]
             
         if provider not in jsonDict:
             if verbose:
@@ -256,14 +341,14 @@ def _process_ucd_column(products, provider, verbose=False):
     
     Return
     ------
-    A dict(name=provider, pars=pars) for every row in products
+    A dict or a list of dict of parameters for every row in products
     
     """
     if not isinstance(products, list):
         raise ValueError('products is expected to be a list')
     
-    if not provider in ProviderHandler.PROVIDERS:
-        raise ValueError(f'provider {provider} is not supported. See ProviderHandler.PROVIDERS')
+    if not provider in PROVIDERS:
+        raise ValueError(f'provider {provider} is not supported. See PROVIDERS')
     
     if not isinstance(products[0], Record):
         raise ValueError((
@@ -279,7 +364,7 @@ def _process_ucd_column(products, provider, verbose=False):
                     
         uri = row.getbyucd(f'meta.ref.{provider}')
         if uri is not None:
-            parname = ProviderHandler.PROVIDERS[provider][0]
+            parname = PROVIDERS[provider][0]
             rows_access_points[irow].append({parname:uri})
         
 
@@ -303,7 +388,7 @@ def _process_cloud_datalinks(products, provider, verbose=False):
         
     Return
     ------
-    A dict(name=provider, pars=pars) for every row in products
+    A dict or a list of dict of parameters for every row in products
     
     """
     if not isinstance(products, list):
@@ -315,8 +400,8 @@ def _process_cloud_datalinks(products, provider, verbose=False):
             f'Record. Found {type(products[0])}'
         ))
     
-    if not provider in ProviderHandler.PROVIDERS:
-        raise ValueError(f'provider {provider} is not supported. See ProviderHandler.PROVIDERS')
+    if provider not in PROVIDERS:
+        raise ValueError(f'provider {provider} is not supported. See PROVIDERS')
     
     if verbose:
         print(f'searching for and processing datalinks')
@@ -368,7 +453,7 @@ def _process_cloud_datalinks(products, provider, verbose=False):
             dl_result = query.execute()
             dl_table = dl_result.to_table()
                 
-            parname = ProviderHandler.PROVIDERS[provider][0]
+            parname = PROVIDERS[provider][0]
             
             for irow in range(nrows):
                 dl_res = dl_table[dl_table['ID'] == products[irow][dl_col_id[0]]]
