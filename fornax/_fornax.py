@@ -39,10 +39,10 @@ def find_product_access(product, provider, mode='all', urlcolumn='auto', verbose
     mode: str
         The mode to use. Options include: json, datalink, ucd, or all.
     urlcolumn: str
-            The name of the column that contains the url link to on-prem data.
-            If 'auto', try to find the url by:
-                - use getdataurl if product is either Record or DALResults
-                - Use any column that contain http links if product is Row or Table.
+        The name of the column that contains the url link to on-prem data.
+        If 'auto', try to find the url by:
+            - use getdataurl if product is either Record or DALResults
+            - Use any column that contain http links if product is Row or Table.
     verbose: bool
         If True, print progress and debug text
 
@@ -85,6 +85,11 @@ def find_product_access(product, provider, mode='all', urlcolumn='auto', verbose
         rows = [product]
     else:
         rows = [_ for _ in product]
+    
+    # get the prem url first
+    prem_ap = [[] for _ in rows]
+    if provider == 'prem':
+        prem_ap = [[{'url':_getdataurl(row, urlcolumn, verbose)}] for row in rows]
 
     json_ap = [[] for _ in rows]
     if mode in ['json', 'all']:
@@ -99,7 +104,7 @@ def find_product_access(product, provider, mode='all', urlcolumn='auto', verbose
         dl_ap = _process_cloud_datalinks(rows, provider, verbose=verbose)
 
     # put them in one list of nrow lists of access points
-    ap_list = [json_ap[irow] + ucd_ap[irow] + dl_ap[irow]
+    ap_list = [prem_ap[irow] + json_ap[irow] + ucd_ap[irow] + dl_ap[irow]
                   for irow in range(len(rows))]
 
     if isinstance(product, (Record, Row)):
@@ -255,6 +260,66 @@ class ProviderHandler(UserDict):
                 errors += f'\n{err_msg}'
         # if we are here, then download has failed. Report the errors
         raise RuntimeError(errors)
+
+
+def _getdataurl(product, urlcolumn='auto', verbose=False):
+    """Work out the prem data url
+
+    Parameters
+    ----------
+    product: Record or Row
+    urlcolumn: str or None
+        The name of the column that contains the url link to on-prem data.
+        If 'auto', try to find the url by:
+            - use getdataurl if product is either pyvo.dal.Record
+            - Use any column that contain http(s) links if product is Row.
+        If None, do not use url for on-prem access
+    verbose: bool
+        If True, print progress and debug text
+
+    Return
+    ------
+    url (as str) if found or None
+
+    """
+
+    if not isinstance(product, (Record, Row)):
+        raise ValueError('product has to be either dal.Record or Row')
+
+    # column names
+    if hasattr(product, 'fieldnames'):
+        # DALResults
+        colnames = product.fieldnames
+    elif hasattr(product, '_results'):
+        # dal.Record
+        colnames = product._results.fieldnames
+    else:
+        colnames = product.colnames
+
+
+    if urlcolumn == 'auto':
+        if isinstance(product, Record):
+            url = product.getdataurl()
+            if verbose:
+                print('Found url using product.getdataurl()')
+        else:
+            # try to find it
+            for col in colnames:
+                if isinstance(product[col], str) and 'http' in product[col]:
+                    url = product[col]
+                    if verbose:
+                        print(f'Using url in column {col}')
+                    break
+    elif urlcolumn is None:
+        url = None
+    else:
+        if urlcolumn not in colnames:
+            raise ValueError(f'colname {urlcolumn} not available in data product')
+        url = product[urlcolumn]
+        if verbose:
+            print(f'Using url in column {urlcolumn}')
+
+    return url
 
 
 def _process_json_column(products, provider, colname=JSON_COLUMN, verbose=False):
