@@ -15,13 +15,17 @@ from .download import http_download, aws_download
 JSON_COLUMN = 'cloud_access'
 
 # supported providers & their parameters
+# The keys are the names of supported providers.
+# The values is a list where the last element is the name
+# of the download function, and the rest are the parameters
+# that need to be passed to it.
 PROVIDERS = {
-    'prem': ['url'],
-    'aws' : ['uri', 'bucket_name', 'key']
+    'prem': ['url', http_download],
+    'aws' : ['uri', 'bucket_name', 'key', aws_download]
 }
 
 
-__all__ = ['ProviderHandler', 'supported_providers', 'get_data_product2']
+__all__ = ['supported_providers', 'get_data_product2']
 
 
 
@@ -184,16 +188,11 @@ class ProviderHandler(UserList):
         Other parameters to be passed to http_download, aws_download etc
         
         """
-        
-        download = {
-            'prem': http_download,
-            'aws' : aws_download
-        }
 
         provider = self.provider
-        download_func  = download[provider]
+        download_func  = PROVIDERS[provider][-1]
         download_links = self.data
-        func_keys = PROVIDERS[provider]
+        func_keys = PROVIDERS[provider][:-1]
 
         errors = ''
         exceptions = []
@@ -332,7 +331,7 @@ def _process_json_column(products, provider, colname=JSON_COLUMN, verbose=False)
         
         jsonDict = json.loads(jsontxt)
         
-        params = PROVIDERS[provider]
+        params = PROVIDERS[provider][:-1]
             
         if provider not in jsonDict:
             if verbose:
