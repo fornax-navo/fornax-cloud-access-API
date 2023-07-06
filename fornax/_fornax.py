@@ -3,7 +3,7 @@ Cloud-related utils
 """
 
 import json
-from collections import UserDict
+from collections import UserDict, UserList
 
 from astropy.table import Table, Row
 from pyvo.dal import Record, DALResults, adhoc, DALServiceError
@@ -115,10 +115,12 @@ def get_data_product2(product, provider, mode='all', urlcolumn='auto', verbose=F
         ap_list = [prem_ap[irow] + json_ap[irow] + ucd_ap[irow] + dl_ap[irow]
                       for irow in range(len(rows))]
 
-    if isinstance(product, (Record, Row)):
-        ap_list = ap_list[0]
 
-    return ap_list
+    handlers = [ProviderHandler(provider, aplist) for aplist in ap_list]
+    if isinstance(product, (Record, Row)):
+        handlers = handlers[0]
+    return handlers
+
 
 
 def supported_providers():
@@ -126,105 +128,48 @@ def supported_providers():
     return list(PROVIDERS.keys())
 
 
-class ProviderHandler(UserDict):
-    """Container for a list of providers as dict
-    
-    This a dict whose keys are suppored providers: prem, aws, etc
-    and for each provider, the value is a list of strings that allow
-    access to the data product. This list contain of the values of 
-    parameters defined in PROVIDERS[provider]. The first element of the
-    list (e.g. url for prem, and uri for aws) will be used as a unique 
-    identifier for that handler
+class ProviderHandler(UserList):
+    """Container for a list of access links from a provider.
+    Basically a list that has a download method
     
     """
-
-    def __init__(self):
-        """Initialize each provider with an empty list"""
-        super(ProviderHandler, self).__init__()
-        for provider, params in PROVIDERS.items():
-            self.data[provider] = []
-
-    def __repr__(self):
-        return json.dumps(self.data, indent=1) 
     
-    def __add__(self, val2):
-        """Combine two Provider instances by concatenating their provider lists"""
-        newp = Provider()
-        for cval in [self, val2]:
-            for key,val in cval.items():
-                newp.data[key] += val
-        return newp
-    
-    def __setitem__(self, key, value):
-        """Not allowed directly; use add_provider
-        """
-        raise NotImplemented(f'use add_provider to add providers')
-
-    
-    def add_handler(self, provider, access_id=None, **kwargs):
-        """Add a data handler
+    def __init__(self, provider, *args):
+        """Initialize the handler by defining the provider and list of access links
         
         Parameters
         ----------
         provider: str
             Provider name: prem, aws, etc. 
-            The list is in the keys of PROVIDERS
-        access_id: str
-            A data access id, e.g. url or uri of the data.
-            If given, it overrides the value of the first parameter 
-            PROVIDERS[provider] in kwargs, if given. Used to avoid
-            duplicates.
-        
-        Keywords
-        --------
-        verbose: bool
-            If True, print progress and debug text
-        
-        Other parameters needed for each provider.
-        The list is in the values of PROVIDERS
+            The list is returned by supported_providers()
+        args:
+            a list of dict values defining the links. e.g the elements of
+            the value returned by get_data_product
         
         """
         if provider not in PROVIDERS:
-            raise ValueError(f'provider: {provider} is not supported')
+            raise ValueError(f'provider {provider} is not supported. See supported_providers')
         
-        verbose = kwargs.pop('verbose', False)
+        super(ProviderHandler, self).__init__(*args)
+        self.provider = provider
         
-        if access_id is not None:
-            if not isinstance(access_id, str):
-                raise ValueError('access_id has to be a str')
-            kwargs[PROVIDERS[provider][0]] = access_id
-        
-        # if 'access_id' already exists; skip
-        access_id = kwargs.get(PROVIDERS[provider][0], None)
-        if access_id is not None:
-            for link in self[provider]:
-                if access_id == link[0]:
-                    if verbose:
-                        print(f'access_id {access_id} already exists. skipping ...')
-                    return
-        
-        
-        params = [kwargs.get(par, None) for par in PROVIDERS[provider]]
-        if all([_ is None for _ in params]):
-            require_p = ', '.join(PROVIDERS[provider])
-            raise ValueError(f'Wrong parameter. Parameters for {provider} are: {require_p}')
-        else:
-            self[provider].append(params)
-
+    def __repr__(self):
+        return f'ProviderHandler(nlinks: {len(self.data)})'
+    
     
     def download(self,
-                 provider, 
                  local_filepath=None,
                  cache=False,
                  timeout=None,
                  verbose=False,
                  **kwargs):
-        """Download data from provider to local_filepath
+        """Download data to local_filepath
+
+        This loops through the available access links, and download
+        data from the first one that is accessible.
         
         Parameters
         ----------
-        provider: str
-            options are prem, aws etc.
         local_filepath: str
             Local path, including filename, where the file is to be downloaded.
         cache : bool
@@ -244,24 +189,26 @@ class ProviderHandler(UserDict):
             'prem': http_download,
             'aws' : aws_download
         }
-        if provider not in download:
-            raise ValueError(f'Unsupported provider {provider}')
+
+        provider = self.provider
         download_func  = download[provider]
-        download_links = self[provider]
+        download_links = self.data
         func_keys = PROVIDERS[provider]
-        
+
         errors = ''
+        exceptions = []
         for link in download_links:
-            kpars = {k:v for k,v in zip(func_keys, link)}
+            kpars = {k:v for k,v in link.items() if k in func_keys}
             kpars.update(local_filepath=local_filepath, cache=cache, 
                          timeout=timeout, verbose=verbose)
             kpars.update(**kwargs)
             try:
                 if verbose:
-                    print(f'Downloading from {provider} ...')
+                    print(f'Downloading from {provider} with parameters {kpars}')
                 download_func(**kpars)
                 return
             except Exception as e:
+                exceptions.append(e)
                 err_msg = f'Downloading from {provider} failed: {str(e)}'
                 if verbose:
                     print(err_msg)
@@ -272,7 +219,10 @@ class ProviderHandler(UserDict):
                     err_msg += f'\n{msg2}'
                 errors += f'\n{err_msg}'
         # if we are here, then download has failed. Report the errors
-        raise RuntimeError(errors)
+        if verbose:
+            print(errors)
+        raise exceptions[-1]
+
 
 
 def _getdataurl(product, urlcolumn='auto', verbose=False):
