@@ -21,11 +21,11 @@ PROVIDERS = {
 }
 
 
-__all__ = ['ProviderHandler', 'find_product_access']
+__all__ = ['ProviderHandler', 'supported_providers', 'get_data_product2']
 
 
 
-def find_product_access(product, provider, mode='all', urlcolumn='auto', verbose=False, **kwargs):
+def get_data_product2(product, provider, mode='all', urlcolumn='auto', verbose=False, **kwargs):
     """Search for data product access information in some data product.
 
     This finds all available access information from prem, aws etc.
@@ -48,6 +48,10 @@ def find_product_access(product, provider, mode='all', urlcolumn='auto', verbose
 
     Keywords
     --------
+    extra_prem: bool
+        If True, find extra prem links from datalinks, json etc. Default is False,
+        which finds the the url based on the value of urlcolumn.
+
     meta data needed to download the data, such as authentication profile
     which will be used to create access points. 
 
@@ -64,6 +68,8 @@ def find_product_access(product, provider, mode='all', urlcolumn='auto', verbose
 
     """
 
+    extra_prem = kwargs.pop('extra_prem', False)
+
     # check product
     if not isinstance(product, (Record, DALResults, Table, Row)):
         raise ValueError((
@@ -72,7 +78,7 @@ def find_product_access(product, provider, mode='all', urlcolumn='auto', verbose
         ))
 
     if provider not in PROVIDERS:
-        raise ValueError(f'provider {provider} is not supported. See PROVIDERS')
+        raise ValueError(f'provider {provider} is not supported. See supported_providers')
 
     # check mode
     if mode not in ['json', 'datalink', 'ucd', 'all']:
@@ -90,27 +96,34 @@ def find_product_access(product, provider, mode='all', urlcolumn='auto', verbose
     prem_ap = [[] for _ in rows]
     if provider == 'prem':
         prem_ap = [[{'url':_getdataurl(row, urlcolumn, verbose)}] for row in rows]
+        ap_list = prem_ap
 
-    json_ap = [[] for _ in rows]
-    if mode in ['json', 'all']:
-        json_ap = _process_json_column(rows, provider, verbose=verbose)
+    if provider != 'prem' or extra_prem:
+        json_ap = [[] for _ in rows]
+        if mode in ['json', 'all']:
+            json_ap = _process_json_column(rows, provider, verbose=verbose)
 
-    ucd_ap = [[] for _ in rows]
-    if mode in ['ucd', 'all']:
-        ucd_ap = _process_ucd_column(rows, provider, verbose=verbose)
+        ucd_ap = [[] for _ in rows]
+        if mode in ['ucd', 'all']:
+            ucd_ap = _process_ucd_column(rows, provider, verbose=verbose)
 
-    dl_ap = [[] for _ in rows]
-    if mode in ['datalink', 'all']:
-        dl_ap = _process_cloud_datalinks(rows, provider, verbose=verbose)
+        dl_ap = [[] for _ in rows]
+        if mode in ['datalink', 'all']:
+            dl_ap = _process_cloud_datalinks(rows, provider, verbose=verbose)
 
-    # put them in one list of nrow lists of access points
-    ap_list = [prem_ap[irow] + json_ap[irow] + ucd_ap[irow] + dl_ap[irow]
-                  for irow in range(len(rows))]
+        # put them in one list of nrow lists of access points
+        ap_list = [prem_ap[irow] + json_ap[irow] + ucd_ap[irow] + dl_ap[irow]
+                      for irow in range(len(rows))]
 
     if isinstance(product, (Record, Row)):
         ap_list = ap_list[0]
 
     return ap_list
+
+
+def supported_providers():
+    """Return a list of supported providers"""
+    return list(PROVIDERS.keys())
 
 
 class ProviderHandler(UserDict):
@@ -271,7 +284,7 @@ def _getdataurl(product, urlcolumn='auto', verbose=False):
     urlcolumn: str or None
         The name of the column that contains the url link to on-prem data.
         If 'auto', try to find the url by:
-            - use getdataurl if product is either pyvo.dal.Record
+            - use getdataurl if product is pyvo.dal.Record
             - Use any column that contain http(s) links if product is Row.
         If None, do not use url for on-prem access
     verbose: bool
@@ -347,7 +360,7 @@ def _process_json_column(products, provider, colname=JSON_COLUMN, verbose=False)
         raise ValueError('products is expected to be a list')
     
     if provider not in PROVIDERS:
-        raise ValueError(f'provider {provider} is not supported. See PROVIDERS')
+        raise ValueError(f'provider {provider} is not supported. See supported_providers')
     
     if verbose:
         print(f'searching for and processing json column {colname}')
@@ -413,7 +426,7 @@ def _process_ucd_column(products, provider, verbose=False):
         raise ValueError('products is expected to be a list')
     
     if not provider in PROVIDERS:
-        raise ValueError(f'provider {provider} is not supported. See PROVIDERS')
+        raise ValueError(f'provider {provider} is not supported. See supported_providers')
     
     if not isinstance(products[0], Record):
         raise ValueError((
@@ -466,7 +479,7 @@ def _process_cloud_datalinks(products, provider, verbose=False):
         ))
     
     if provider not in PROVIDERS:
-        raise ValueError(f'provider {provider} is not supported. See PROVIDERS')
+        raise ValueError(f'provider {provider} is not supported. See supported_providers')
     
     if verbose:
         print(f'searching for and processing datalinks')
