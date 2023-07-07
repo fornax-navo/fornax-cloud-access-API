@@ -108,11 +108,11 @@ def get_data_product2(product, provider, mode='all', urlcolumn='auto', verbose=F
             json_ap = _process_json_column(rows, provider, verbose=verbose)
 
         ucd_ap = [[] for _ in rows]
-        if mode in ['ucd', 'all']:
+        if mode in ['ucd', 'all'] and isinstance(rows[0], Record):
             ucd_ap = _process_ucd_column(rows, provider, verbose=verbose)
 
         dl_ap = [[] for _ in rows]
-        if mode in ['datalink', 'all']:
+        if mode in ['datalink', 'all'] and isinstance(rows[0], Record):
             dl_ap = _process_cloud_datalinks(rows, provider, verbose=verbose)
 
         # put them in one list of nrow lists of access points
