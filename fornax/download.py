@@ -3,13 +3,47 @@ Utilties for downloading data
 """
 import threading
 import os
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote, parse_qs
+
 from posixpath import split
 
 import astropy
 from astropy.utils.console import ProgressBarOrSpinner
 
 from pyvo.utils.http import use_session
+
+
+def _extract_filename(url):
+    """Extract file name from uri/url
+    handle cases of urls of the form:
+    http://somesite.com/service?file=/location/file.jpg&size=large
+    http://somesite.com/location/file.jpg
+    
+    Parameters
+    ----------
+    url: str
+        url or uri
+    
+    """
+    parsed_url = urlparse(url)
+    filename = None
+
+    # Check if the file path is included as a query parameter
+    query_params = parse_qs(parsed_url.query)
+    for param, values in query_params.items():
+        if len(values) > 0:
+            file_path = unquote(values[0])
+            filename = os.path.basename(file_path)
+            break
+
+    # If no file name found in query parameters, check the path itself
+    if filename is None:
+        file_path = parsed_url.path
+        if file_path:
+            filename = os.path.basename(file_path)
+
+    return filename
+
 
 # adapted from astroquery._download_file.
 def http_download(url,
@@ -46,8 +80,7 @@ def http_download(url,
     method = 'GET'
 
     if not local_filepath:
-        parsed = urlparse(url)
-        local_filepath = split(parsed.path)[-1]
+        local_filepath = _extract_filename(url)
 
 
     response = _session.request(method, url, timeout=timeout,
@@ -187,7 +220,7 @@ def aws_download(uri=None,
         print(f'bucket: {bucket_name}, key: {key}')
 
     if not local_filepath:
-        local_filepath = split(key)[-1]
+        local_filepath = _extract_filename(f's3://{bucket_name}/{key}')
 
 
     if session:
