@@ -12,6 +12,7 @@ from astropy.utils.console import ProgressBarOrSpinner
 
 from pyvo.utils.http import use_session
 
+__all__ = ['http_download', 'aws_download']
 
 def _extract_filename(url):
     """Extract file name from uri/url
@@ -73,7 +74,11 @@ def http_download(url,
     Keywords
     --------
     additional keywords to be passed to session.request()
-    
+
+    Return
+    ------
+    local_filepath: path to the downloaded file
+
     """
 
     _session = use_session(session)
@@ -107,12 +112,12 @@ def http_download(url,
                 if verbose:
                     print(f'Found cached file {local_filepath} with the expected size.')
                 response.close()
-                return
+                return local_filepath
         else:
             if verbose:
                 print(f'Found cached file {local_filepath}.')
             response.close()
-            return
+            return local_filepath
     else:
         response = _session.request(method, url, timeout=timeout,
                                          stream=True, **kwargs)
@@ -131,6 +136,7 @@ def http_download(url,
                 else:
                     pb.update(n_bytes)
     response.close()
+    return local_filepath
 
 
 def _s3_is_accessible(s3_resource, bucket_name, key):
@@ -202,6 +208,10 @@ def aws_download(uri=None,
     verbose: bool
         If True, print progress and debug text
 
+    Return
+    ------
+    local_filepath: path to the downloaded file
+
     """
     try:
         import boto3
@@ -271,7 +281,7 @@ def aws_download(uri=None,
                 # found cached file with expected size. Stop
                 if verbose:
                     print(f'Found cached file {local_filepath}.')
-                return
+                return local_filepath
             if verbose:
                 print(f'Found cached file {local_filepath} with size {statinfo.st_size} '
                       f'that is different from expected size {length}')
@@ -296,3 +306,4 @@ def aws_download(uri=None,
                 pb.update(bytes_read)
 
         bkt.download_file(key, local_filepath, Callback=progress_callback)
+    return local_filepath
