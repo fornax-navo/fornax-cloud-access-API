@@ -204,8 +204,8 @@ class ProviderHandler(UserList):
             try:
                 if verbose:
                     print(f'Downloading from {provider} with parameters {kpars}')
-                download_func(**kpars)
-                return
+                local_file = download_func(**kpars)
+                return local_file
             except Exception as e:
                 exceptions.append(e)
                 err_msg = f'Downloading from {provider} failed: {str(e)}'
