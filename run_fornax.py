@@ -9,6 +9,9 @@ sys.path.insert(0, os.getcwd())
 import fornax
 print(f'\nUsing fornax library in: {fornax.__file__}\n')
 
+# test download functions
+from fornax.download import http_download, aws_download
+
 
 
 pos = coord.SkyCoord.from_name("ngc 4151")
@@ -19,10 +22,30 @@ query_url = 'https://heasarc.gsfc.nasa.gov/xamin_aws/vo/sia?table=chanmaster&'
 # hst #
 #query_url = 'https://mast.stsci.edu/portal_vo/Mashup/VoQuery.asmx/SiaV1?MISSION=HST&'
 
+# Do a basic query
 query_result = pyvo.dal.sia.search(query_url, pos=pos, size=0.0)
 table_result = query_result.to_table()
 access_url_column = query_result.fieldname_with_ucd('VOX:Image_AccessReference')
 
+
+## -------------------------------- ##
+## -- Testing download functions -- ##
+test_download = False
+if test_download:
+    # http
+    print(f'\nTest download_http:\n{"+"*40}')
+    url = table_result[0]['access_url']
+    print(url)
+    http_download(url)
+
+    # aws
+    print(f'\nTest download_aws:\n{"+"*40}')
+    s3_uri = table_result[0]['aws']
+    print(s3_uri)
+    aws_download(s3_uri)
+    exit(0)
+from IPython import embed; embed();exit(0)
+## -------------------------------- ##
 
 
 # data handler
