@@ -158,9 +158,25 @@ class ProviderHandler(UserList):
         self.provider = provider
         
     def __repr__(self):
-        return f'ProviderHandler(nlinks: {len(self.data)})'
-    
-    
+        return f'{self.provider.title()}Data[{len(self.data)}]'
+
+
+    def get_links(self):
+        """Return direct links as url/uri's"""
+
+        provider = self.provider
+        link_keys = self.data
+
+        if provider == 'prem':
+            links = [lkeys['url'] for lkeys in link_keys]
+        elif provider == 'aws':
+            links = [lkeys['uri'] if 'uri' in lkeys and lkeys['uri'] is not None else 
+                     f"s3://{lkeys['bucket_name']}/{lkeys['key']}" for lkeys in link_keys]
+        else:
+            raise NotImplemented(f'Unknow provider {provider}')
+        return links
+
+
     def download(self,
                  local_filepath=None,
                  cache=False,
